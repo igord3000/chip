@@ -97,7 +97,9 @@ class ChipApp(App):
     
     #input-container {
         height: 3;
-        padding: 1;
+        padding: 0 1;
+        background: $surface;
+        border-top: solid $primary;
     }
     
     #user-input {
@@ -137,8 +139,8 @@ class ChipApp(App):
     
     BINDINGS = [
         Binding("ctrl+q", "quit", "Quit"),
-        Binding("ctrl+c", "clear_chat", "Clear Chat"),
-        Binding("ctrl+s", "save_session", "Save Session"),
+        Binding("ctrl+c", "clear_chat", "Clear"),
+        Binding("ctrl+s", "save_session", "Save"),
     ]
     
     def __init__(self, model: str = "qwen3:1.7b"):
@@ -155,12 +157,10 @@ class ChipApp(App):
     
     def compose(self) -> ComposeResult:
         yield StatusBar(self.model)
-        yield Header(show_clock=True)
         yield ScrollableContainer(id="chat-container")
         with Horizontal(id="input-container"):
             yield Input(placeholder="Type your message...", id="user-input")
             yield Button("Send", id="send-btn", variant="primary")
-        yield Footer()
     
     @on(Input.Submitted, "#user-input")
     @on(Button.Pressed, "#send-btn")
