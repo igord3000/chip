@@ -15,7 +15,7 @@ from chip.tools import ToolRegistry
 
 tools = ToolRegistry()
 
-# Track conversation state
+# Track conversation state - key is number of user messages
 conversation_state = {}
 
 
@@ -35,14 +35,15 @@ class MockHandler(BaseHTTPRequestHandler):
         
         messages = body.get('messages', [])
         
-        # Get conversation ID (first user message hash)
-        conv_id = "default"
-        for msg in messages:
-            if msg.get('role') == 'user':
-                conv_id = str(hash(msg.get('content', '')))[:8]
-                break
+        # Count user messages to detect new conversation
+        user_msg_count = sum(1 for m in messages if m.get('role') == 'user')
         
-        state = conversation_state.get(conv_id, {"step": 0, "search_result": "", "fetch_result": ""})
+        # If only 1 user message, it's a new conversation - reset state
+        if user_msg_count == 1:
+            conversation_state.clear()
+        
+        # Get state for current conversation
+        state = conversation_state.get("current", {"step": 0, "search_result": "", "fetch_result": ""})
         
         # Get user message
         user_msg = ""
@@ -72,7 +73,7 @@ class MockHandler(BaseHTTPRequestHandler):
             search_result = tools.call('web_search', {'query': search_query, 'num_results': 3})
             state["search_result"] = search_result.output
             state["step"] = 1
-            conversation_state[conv_id] = state
+            conversation_state["current"] = state
             
             # Extract first URL for fetching
             first_url = ""
@@ -113,7 +114,7 @@ class MockHandler(BaseHTTPRequestHandler):
                 fetch_result = tools.call('web_fetch', {'url': first_url, 'format': 'text'})
                 state["fetch_result"] = fetch_result.output
                 state["step"] = 2
-                conversation_state[conv_id] = state
+                conversation_state["current"] = state
                 
                 self._send({
                     "choices": [{
@@ -139,7 +140,7 @@ class MockHandler(BaseHTTPRequestHandler):
             answer = self._analyze_and_answer(user_msg, state["search_result"], state["fetch_result"])
             
             # Reset state
-            conversation_state[conv_id] = {"step": 0, "search_result": "", "fetch_result": ""}
+            conversation_state["current"] = {"step": 0, "search_result": "", "fetch_result": ""}
             
             self._send({
                 "choices": [{"message": {"role": "assistant", "content": answer}}]

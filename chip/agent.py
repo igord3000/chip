@@ -169,10 +169,9 @@ class Agent:
         
         chat_ui.print_welcome()
         
-        # Load last session
-        self._load_last_session()
-        if self.messages:
-            chat_ui.print_info(f"Loaded session ({len(self.messages)} messages)")
+        # Start fresh - don't auto-load old sessions
+        # Use /resume to load previous session
+        chat_ui.print_info("Starting fresh session. Use /resume to load previous.")
         
         while True:
             user_input = chat_ui.get_input()
@@ -202,6 +201,13 @@ class Agent:
                     continue
                 elif cmd == "/sessions":
                     self._show_sessions(chat_ui)
+                    continue
+                elif cmd == "/resume":
+                    self._load_last_session()
+                    if self.messages:
+                        chat_ui.print_info(f"Loaded session ({len(self.messages)} messages)")
+                    else:
+                        chat_ui.print_info("No previous session found.")
                     continue
                 elif cmd == "/help":
                     self._show_help(chat_ui)
@@ -283,6 +289,7 @@ class Agent:
 Commands:
   /exit, /quit  - Save and exit
   /save         - Save current session
+  /resume       - Load previous session
   /clear        - Clear context
   /sessions     - List saved sessions
   /help         - Show this help
