@@ -156,3 +156,126 @@ class Agent:
             f.write(resume_prompt)
 
         self.ui.print_info("Session auto-saved. Use --resume to continue.")
+
+    def chat(self):
+        """Interactive chat mode with context persistence."""
+        self.ui.print_header(self.config.llm.model, self.tools.tool_names)
+        self.ui.print_info("Interactive mode. Type 'exit' or 'quit' to stop.")
+        self.ui.print_info("Type 'save' to save session, 'clear' to reset context.")
+        print()
+        
+        # Load last session if exists
+        self._load_last_session()
+        
+        while True:
+            try:
+                user_input = self.ui.get_user_input()
+            except (EOFError, KeyboardInterrupt):
+                print("\nGoodbye!")
+                break
+            
+            if not user_input:
+                continue
+            
+            if user_input.lower() in ('exit', 'quit', 'q'):
+                self._save_session()
+                print("Goodbye!")
+                break
+            
+            if user_input.lower() == 'save':
+                self._save_session()
+                continue
+            
+            if user_input.lower() == 'clear':
+                self.messages = [
+                    {"role": "system", "content": SYSTEM_PROMPT}
+                ]
+                self.tracker = ContextTracker(
+                    max_tokens=self.config.context.max_context_tokens,
+                    warning_threshold=self.config.context.warning_threshold,
+                    critical_threshold=self.config.context.critical_threshold,
+                )
+                print("Context cleared.")
+                continue
+            
+            self._process_message(user_input)
+
+    def _process_message(self, user_message: str):
+        """Process a single message in chat mode."""
+        if not self.messages:
+            self.messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_message}
+            ]
+        else:
+            self.messages.append({"role": "user", "content": user_message})
+        
+        for turn in range(1, self.config.max_turns + 1):
+            try:
+                response = self.llm.chat(self.messages, self.tools.to_openai_tools())
+            except Exception as e:
+                self.ui.print_error(f"LLM error: {e}")
+                return
+            
+            if response.content:
+                self.ui.print_assistant_message(response.content)
+            
+            if not response.tool_calls:
+                self._update_context()
+                return
+            
+            for tool_call in response.tool_calls:
+                func_name = tool_call["function"]["name"]
+                try:
+                    arguments = json.loads(tool_call["function"]["arguments"])
+                except json.JSONDecodeError:
+                    arguments = {}
+                
+                self.ui.print_tool_call(func_name, arguments)
+                result = self.tools.call(func_name, arguments)
+                self.ui.print_tool_result(result.output, result.success)
+                
+                self.messages.append({
+                    "role": "assistant",
+                    "content": response.content or None,
+                    "tool_calls": [tool_call]
+                })
+                self.messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call["id"],
+                    "content": result.output if result.success else f"Error: {result.error}"
+                })
+            
+            if self._update_context():
+                return
+
+    def _save_session(self):
+        """Save current session."""
+        if self.messages and len(self.messages) > 1:
+            path = self.checkpoint.save(
+                self.messages,
+                self.project_context,
+                {"tokens_used": self.tracker.current_tokens}
+            )
+            self.ui.print_info(f"Session saved: {path}")
+            
+            # Also save as last session
+            last_session = self.config.checkpoint_dir / "last_session.json"
+            with open(last_session, "w", encoding="utf-8") as f:
+                json.dump({
+                    "messages": self.messages,
+                    "project_context": self.project_context
+                }, f, ensure_ascii=False, indent=2)
+
+    def _load_last_session(self):
+        """Load last session if exists."""
+        last_session = self.config.checkpoint_dir / "last_session.json"
+        if last_session.exists():
+            try:
+                with open(last_session, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self.messages = data.get("messages", [])
+                self.project_context = data.get("project_context", "")
+                self.ui.print_info(f"Loaded previous session ({len(self.messages)} messages)")
+            except Exception:
+                pass

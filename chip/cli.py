@@ -129,13 +129,10 @@ def run(args=None):
         parser.add_argument("task", nargs="*", help="Task to execute")
         parser.add_argument("--model", type=str, help="Override LLM model")
         parser.add_argument("--resume", type=str, help="Resume from checkpoint")
+        parser.add_argument("--chat", action="store_true", help="Interactive chat mode")
         parser.add_argument("--max-turns", type=int, help="Max turns")
         parser.add_argument("--timeout", type=int, help="LLM timeout in seconds")
         args = parser.parse_args()
-    
-    if not args.task:
-        print("No task provided. Usage: chip run \"your task\"")
-        sys.exit(1)
     
     from chip.agent import Agent
     from chip.config import load_config
@@ -149,7 +146,13 @@ def run(args=None):
         config.llm.timeout = args.timeout
     
     agent = Agent(config)
-    agent.run(" ".join(args.task), resume_from=args.resume)
+    
+    if args.chat:
+        agent.chat()
+    elif args.task:
+        agent.run(" ".join(args.task), resume_from=args.resume)
+    else:
+        agent.chat()
 
 
 def status():
@@ -231,6 +234,7 @@ def main():
     run_parser.add_argument("task", nargs="*", help="Task to execute")
     run_parser.add_argument("--model", type=str, help="Override LLM model")
     run_parser.add_argument("--resume", type=str, help="Resume from checkpoint")
+    run_parser.add_argument("--chat", action="store_true", help="Interactive chat mode")
     run_parser.add_argument("--max-turns", type=int, help="Max turns")
     run_parser.add_argument("--timeout", type=int, help="LLM timeout in seconds")
     
