@@ -1,6 +1,7 @@
 """Web fetch tool for downloading content from URLs."""
 from typing import Any
 import requests
+import re
 
 from .base import BaseTool, ToolResult
 
@@ -12,7 +13,7 @@ class WebFetchTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Fetch content from a URL (web page, API, file)."
+        return "Fetch content from a URL (web page, API, file). Extracts readable text from HTML."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -47,7 +48,8 @@ class WebFetchTool(BaseTool):
                 url = "https://" + url
 
             headers = {
-                "User-Agent": "Mozilla/5.0 (compatible; ChipAgent/1.0)"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept-Language": "en-US,en;q=0.9,ru;q=0.8"
             }
 
             response = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
@@ -63,13 +65,13 @@ class WebFetchTool(BaseTool):
             elif format == "html":
                 output = response.text
             else:
-                output = response.text
+                output = self._extract_text(response.text)
                 if len(output) > 10000:
-                    output = output[:10000] + f"\n\n[Truncated: {len(response.text)} total chars]"
+                    output = output[:10000] + f"\n\n[Truncated: total content longer]"
 
             return ToolResult(
                 success=True,
-                output=f"Status: {response.status_code}\nContent-Type: {response.headers.get('content-type', 'unknown')}\n\n{output}"
+                output=f"Status: {response.status_code}\nContent-Type: {response.headers.get('content-type', 'unknown')}\nURL: {url}\n\n{output}"
             )
         except requests.exceptions.Timeout:
             return ToolResult(success=False, output="", error=f"Request timed out after {timeout}s")
@@ -79,3 +81,31 @@ class WebFetchTool(BaseTool):
             return ToolResult(success=False, output="", error=f"HTTP error: {e.response.status_code}")
         except Exception as e:
             return ToolResult(success=False, output="", error=str(e))
+
+    def _extract_text(self, html: str) -> str:
+        """Extract readable text from HTML."""
+        # Remove scripts and styles
+        html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL)
+        html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL)
+        
+        # Extract meta description
+        meta_desc = re.search(r'<meta[^>]*name="description"[^>]*content="([^"]*)"', html)
+        if meta_desc:
+            html = f"<p>{meta_desc.group(1)}</p>\n{html}"
+        
+        # Replace common block elements with newlines
+        html = re.sub(r'<(?:div|p|br|h[1-6]|li|tr)[^>]*>', '\n', html)
+        html = re.sub(r'</(?:div|p|h[1-6]|li|tr)>', '\n', html)
+        
+        # Remove all remaining HTML tags
+        text = re.sub(r'<[^>]+>', '', html)
+        
+        # Decode HTML entities
+        text = text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+        text = text.replace('&quot;', '"').replace('&#x27;', "'").replace('&nbsp;', ' ')
+        
+        # Clean up whitespace
+        lines = [line.strip() for line in text.splitlines()]
+        lines = [line for line in lines if line and len(line) > 3]
+        
+        return '\n'.join(lines[:100])
