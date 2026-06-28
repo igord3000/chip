@@ -26,7 +26,7 @@ class ContextConfig:
 class AgentConfig:
     max_turns: int = field(default_factory=lambda: int(os.getenv("AGENT_MAX_TURNS", "1000")))
     bash_timeout: int = field(default_factory=lambda: int(os.getenv("BASH_TIMEOUT", "120")))
-    checkpoint_dir: Path = field(default_factory=lambda: Path(os.getenv("CHECKPOINT_DIR", ".chip")))
+    checkpoint_dir: Path = field(default_factory=lambda: Path(os.getenv("CHECKPOINT_DIR", Path.home() / ".chip")))
 
     llm: LLMConfig = field(default_factory=LLMConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
