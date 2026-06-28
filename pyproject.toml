@@ -1,8 +1,17 @@
 [project]
-name = "chebupelka"
-version = "0.1.0"
-description = "Minimal coding agent"
+name = "chip"
+version = "0.2.0"
+description = "Minimal coding agent with context tracking"
 requires-python = ">=3.10"
 dependencies = [
     "requests>=2.31.0",
+    "rich>=13.0.0",
+    "tiktoken>=0.5.0",
 ]
+
+[project.scripts]
+chip = "chip.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

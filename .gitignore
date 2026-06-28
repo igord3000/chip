@@ -9,3 +9,13 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Chebupelka checkpoints
+.chebupelka/
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
