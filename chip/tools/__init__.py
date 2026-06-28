@@ -7,6 +7,9 @@ from .read_file import ReadFileTool
 from .write_file import WriteFileTool
 from .list_files import ListFilesTool
 from .subagent import SubagentTool
+from .web_fetch import WebFetchTool
+from .web_search import WebSearchTool
+from .download import DownloadTool
 
 
 class ToolRegistry:
@@ -20,6 +23,9 @@ class ToolRegistry:
         self.register(WriteFileTool())
         self.register(ListFilesTool())
         self.register(SubagentTool(manager=subagent_manager))
+        self.register(WebFetchTool())
+        self.register(WebSearchTool())
+        self.register(DownloadTool())
 
     def register(self, tool: BaseTool):
         self._tools[tool.name] = tool

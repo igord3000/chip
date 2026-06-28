@@ -32,25 +32,44 @@ class MockHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/chat/completions":
             messages = body.get('messages', [])
             last_msg = messages[-1] if messages else {}
+            content = last_msg.get('content', '').lower()
             
-            # Simple responses based on content
-            content = last_msg.get('content', '')
-            
-            if 'hello' in content.lower() or 'привет' in content.lower():
-                response_text = "Hello! How can I help you?"
-            elif 'write' in content.lower() or 'создай' in content.lower():
-                # Return tool call to write a file
+            if 'hello' in content or 'привет' in content:
+                response_text = "Hello! I can help you with programming and internet research."
+            elif 'search' in content or 'найди' in content:
                 response = {
                     "choices": [{
                         "message": {
                             "role": "assistant",
-                            "content": "I'll create a hello.py file for you.",
+                            "content": "I'll search the web for that information.",
                             "tool_calls": [{
                                 "id": "call_1",
                                 "type": "function",
                                 "function": {
-                                    "name": "write_file",
-                                    "arguments": json.dumps({"path": "hello.py", "content": 'print("Hello, World!")'})
+                                    "name": "web_search",
+                                    "arguments": json.dumps({"query": "Python programming tutorial", "num_results": 3})
+                                }
+                            }]
+                        }
+                    }]
+                }
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(response).encode())
+                return
+            elif 'fetch' in content or 'скачай' in content or 'прочитай' in content:
+                response = {
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": "I'll fetch that URL for you.",
+                            "tool_calls": [{
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "web_fetch",
+                                    "arguments": json.dumps({"url": "https://httpbin.org/json", "format": "text"})
                                 }
                             }]
                         }
@@ -62,7 +81,7 @@ class MockHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(response).encode())
                 return
             else:
-                response_text = f"I understand your request: '{content[:50]}...' How can I help?"
+                response_text = f"I understand: '{content[:50]}...' I can search the web, fetch URLs, or help with code."
             
             response = {
                 "choices": [{
