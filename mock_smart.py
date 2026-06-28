@@ -1,28 +1,35 @@
 #!/usr/bin/env python3
-"""Smart mock that handles different query types."""
+"""Smart mock with conversation context."""
 import json
 import random
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# Responses for different query types
+# Track conversation context
+conversation_context = {}
+
 RESPONSES = {
     "greeting": [
         "Привет! У меня всё отлично, спасибо! Чем могу помочь?",
         "Привет! Хорошо, работаю! Задавай вопрос!",
         "Привет! Всё супер! Как дела у тебя?"
     ],
-    "joke": [
-        "— Почему программист путает Хеллоуин и Рождество?\n— Потому что Oct 31 = Dec 25!\n(31 в восьмеричной = 25 в десятичной)",
+    "jokes": [
+        "— Почему программист путает Хеллоуин и Рождество?\n— Потому что Oct 31 = Dec 25!",
         "Программист: 'У меня нет багов, только фичи!'",
-        "Два байта встретились. Один спрашивает: 'Ты в порядке?' Второй: 'Нет, у меня переполнение...'"
+        "Два байта встретились. Один спрашивает: 'Ты в порядке?' Второй: 'Нет, у меня переполнение...'",
+        "— Как программист проверяет, не в Матрице ли он?\n— Пытается разделить на ноль.",
+        "Программист жёнам: 'Я не играю в игры, я тестирую интерфейсы!'",
+        "— Сколько программистов нужно, чтобы вкрутить лампочку?\n— Ни одного, это аппаратная проблема!"
     ],
-    "weather_miass": """**Погода в Миассе сейчас:**
+    "weather_miass": """**Погода в Миассе:**
 • Облачно с прояснениями
 • Температура: +18°C (ощущается как +16°C)
 • Ветер: 2.9 м/с, северный
 • Давление: 721 мм рт. ст.
 • Влажность: 56%
-• Восход: 21:42, Закат: 04:23""",
+• Восход: 21:42, Закат: 04:23
+
+Прогноз на неделю: понедельник +15°, вторник +17°, среда +19°, четверг +16°, пятница +14°""",
     
     "python_news": """**Новости Python:**
 • Python 3.13 — новый JIT компилятор
@@ -51,6 +58,16 @@ class MockHandler(BaseHTTPRequestHandler):
         
         messages = body.get('messages', [])
         
+        # Get conversation ID from first user message
+        conv_id = "default"
+        for msg in messages:
+            if msg.get('role') == 'user':
+                conv_id = str(hash(msg.get('content', '')))[:8]
+                break
+        
+        # Get context for this conversation
+        ctx = conversation_context.get(conv_id, {"topic": None, "city": None})
+        
         # Get user message
         user_msg = ""
         for msg in reversed(messages):
@@ -62,33 +79,43 @@ class MockHandler(BaseHTTPRequestHandler):
         has_results = any(m.get('role') == 'tool' for m in messages)
         
         if has_results:
-            # Get last tool result
             for msg in reversed(messages):
                 if msg.get('role') == 'tool':
                     result = msg.get('content', '')
-                    # Try to extract answer from result
                     answer = self._extract_answer(user_msg, result)
                     self._send({"choices": [{"message": {"role": "assistant", "content": answer}}]})
                     return
         
-        # Classify query and respond
-        answer = self._classify_and_respond(user_msg)
+        # Classify and respond with context
+        answer = self._classify_with_context(user_msg, ctx)
+        
+        # Update context
+        if 'погод' in user_msg:
+            ctx["topic"] = "weather"
+            if 'миасс' in user_msg or 'миас' in user_msg:
+                ctx["city"] = "миасс"
+        conversation_context[conv_id] = ctx
+        
         self._send({"choices": [{"message": {"role": "assistant", "content": answer}}]})
     
-    def _classify_and_respond(self, query):
-        """Classify query type and return appropriate response."""
-        query = query.lower().strip()
+    def _classify_with_context(self, query, ctx):
+        """Classify query with context awareness."""
+        
+        # If just a city name and we were talking about weather
+        if ctx.get("topic") == "weather" and len(query.split()) <= 2:
+            if any(city in query for city in ['миасс', 'миас', 'москва', 'петербург', 'екатеринбург']):
+                return RESPONSES["weather_miass"]
         
         # Greetings
-        if any(w in query for w in ['привет', 'здравствуй', 'добрый', 'hello', 'hi', 'йо']):
+        if any(w in query for w in ['привет', 'здравствуй', 'добрый', 'hello', 'hi']):
             return random.choice(RESPONSES["greeting"])
         
-        # Jokes
-        if any(w in query for w in ['анекдот', 'шутк', 'joke', 'смешн', 'рассмеши']):
-            return random.choice(RESPONSES["joke"])
+        # Jokes (with variety)
+        if any(w in query for w in ['анекдот', 'шутк', 'joke', 'смешн', 'рассмеши', 'другой анекдот', 'еще анекдот']):
+            return random.choice(RESPONSES["jokes"])
         
         # Weather
-        if any(w in query for w in ['погод', 'weather', 'температур', 'градус']):
+        if any(w in query for w in ['погод', 'weather', 'температур', 'градус', 'на неделю']):
             if 'миасс' in query or 'миас' in query:
                 return RESPONSES["weather_miass"]
             return "Уточните город для прогноза погоды."
@@ -113,7 +140,6 @@ class MockHandler(BaseHTTPRequestHandler):
         result = tools.call('web_search', {'query': query, 'num_results': 3})
         
         if result.success and "No results" not in result.output:
-            # Extract first meaningful result
             lines = result.output.split('\n')
             for line in lines:
                 if line.strip() and not line.startswith('Search results') and 'URL:' not in line and len(line.strip()) > 20:
@@ -144,5 +170,5 @@ class MockHandler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     server = HTTPServer(('127.0.0.1', 11434), MockHandler)
-    print("Smart Mock: greetings, jokes, weather, python, search")
+    print("Smart Mock with context: greetings, jokes, weather, python, search")
     server.serve_forever()
