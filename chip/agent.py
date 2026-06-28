@@ -158,50 +158,64 @@ class Agent:
         self.ui.print_info("Session auto-saved. Use --resume to continue.")
 
     def chat(self):
-        """Interactive chat mode with context persistence."""
-        self.ui.print_header(self.config.llm.model, self.tools.tool_names)
-        self.ui.print_info("Interactive mode. Type 'exit' or 'quit' to stop.")
-        self.ui.print_info("Type 'save' to save session, 'clear' to reset context.")
-        print()
+        """Interactive chat mode - like ChatGPT/Claude interface."""
+        from chip.ui.chat import ChatUI
         
-        # Load last session if exists
+        chat_ui = ChatUI(
+            model=self.config.llm.model,
+            tools=self.tools.tool_names,
+            checkpoint_dir=self.config.checkpoint_dir
+        )
+        
+        chat_ui.print_welcome()
+        
+        # Load last session
         self._load_last_session()
+        if self.messages:
+            chat_ui.print_info(f"Loaded session ({len(self.messages)} messages)")
         
         while True:
-            try:
-                user_input = self.ui.get_user_input()
-            except (EOFError, KeyboardInterrupt):
-                print("\nGoodbye!")
-                break
+            user_input = chat_ui.get_input()
             
             if not user_input:
                 continue
             
-            if user_input.lower() in ('exit', 'quit', 'q'):
-                self._save_session()
-                print("Goodbye!")
-                break
+            # Handle commands
+            if user_input.startswith("/"):
+                cmd = user_input.lower().strip()
+                if cmd in ("/exit", "/quit", "/q"):
+                    self._save_session()
+                    chat_ui.print_info("Session saved. Goodbye!")
+                    break
+                elif cmd == "/save":
+                    self._save_session()
+                    chat_ui.print_session_saved("saved")
+                    continue
+                elif cmd == "/clear":
+                    self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+                    self.tracker = ContextTracker(
+                        max_tokens=self.config.context.max_context_tokens,
+                        warning_threshold=self.config.context.warning_threshold,
+                        critical_threshold=self.config.context.critical_threshold,
+                    )
+                    chat_ui.print_info("Context cleared.")
+                    continue
+                elif cmd == "/sessions":
+                    self._show_sessions(chat_ui)
+                    continue
+                elif cmd == "/help":
+                    self._show_help(chat_ui)
+                    continue
+                else:
+                    chat_ui.print_info("Unknown command. Type /help")
+                    continue
             
-            if user_input.lower() == 'save':
-                self._save_session()
-                continue
-            
-            if user_input.lower() == 'clear':
-                self.messages = [
-                    {"role": "system", "content": SYSTEM_PROMPT}
-                ]
-                self.tracker = ContextTracker(
-                    max_tokens=self.config.context.max_context_tokens,
-                    warning_threshold=self.config.context.warning_threshold,
-                    critical_threshold=self.config.context.critical_threshold,
-                )
-                print("Context cleared.")
-                continue
-            
-            self._process_message(user_input)
+            # Process message
+            chat_ui.print_user_message(user_input)
+            self._process_message_with_ui(user_input, chat_ui)
 
-    def _process_message(self, user_message: str):
-        """Process a single message in chat mode."""
+    def _process_message_with_ui(self, user_message: str, chat_ui):
+        """Process message with chat UI."""
         if not self.messages:
             self.messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -214,14 +228,15 @@ class Agent:
             try:
                 response = self.llm.chat(self.messages, self.tools.to_openai_tools())
             except Exception as e:
-                self.ui.print_error(f"LLM error: {e}")
+                chat_ui.print_error(f"LLM error: {e}")
                 return
             
             if response.content:
-                self.ui.print_assistant_message(response.content)
+                chat_ui.print_assistant_message(response.content)
             
             if not response.tool_calls:
-                self._update_context()
+                tokens = self.tracker.update(self.messages)
+                chat_ui.print_token_bar(self.tracker)
                 return
             
             for tool_call in response.tool_calls:
@@ -231,9 +246,9 @@ class Agent:
                 except json.JSONDecodeError:
                     arguments = {}
                 
-                self.ui.print_tool_call(func_name, arguments)
+                chat_ui.print_tool_call(func_name, arguments)
                 result = self.tools.call(func_name, arguments)
-                self.ui.print_tool_result(result.output, result.success)
+                chat_ui.print_tool_result(result.output, result.success)
                 
                 self.messages.append({
                     "role": "assistant",
@@ -246,8 +261,33 @@ class Agent:
                     "content": result.output if result.success else f"Error: {result.error}"
                 })
             
-            if self._update_context():
+            tokens = self.tracker.update(self.messages)
+            if self.tracker.is_critical:
+                self._auto_checkpoint()
+                chat_ui.print_error("Context limit reached!")
                 return
+
+    def _show_sessions(self, chat_ui):
+        """Show available sessions."""
+        checkpoints = sorted(self.checkpoint_dir.glob("checkpoint_*.json"))
+        if not checkpoints:
+            chat_ui.print_info("No saved sessions.")
+            return
+        chat_ui.print_info("Saved sessions:")
+        for cp in checkpoints[-5:]:
+            chat_ui.print_info(f"  {cp.name}")
+
+    def _show_help(self, chat_ui):
+        """Show help."""
+        help_text = """
+Commands:
+  /exit, /quit  - Save and exit
+  /save         - Save current session
+  /clear        - Clear context
+  /sessions     - List saved sessions
+  /help         - Show this help
+"""
+        chat_ui.print_info(help_text)
 
     def _save_session(self):
         """Save current session."""
@@ -257,9 +297,7 @@ class Agent:
                 self.project_context,
                 {"tokens_used": self.tracker.current_tokens}
             )
-            self.ui.print_info(f"Session saved: {path}")
             
-            # Also save as last session
             last_session = self.config.checkpoint_dir / "last_session.json"
             with open(last_session, "w", encoding="utf-8") as f:
                 json.dump({
@@ -276,6 +314,5 @@ class Agent:
                     data = json.load(f)
                 self.messages = data.get("messages", [])
                 self.project_context = data.get("project_context", "")
-                self.ui.print_info(f"Loaded previous session ({len(self.messages)} messages)")
             except Exception:
                 pass
