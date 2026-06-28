@@ -1,15 +1,36 @@
 """Configuration management with env vars and config file support."""
 import os
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+
+def _detect_model() -> str:
+    """Auto-detect available Ollama model."""
+    try:
+        result = subprocess.run(
+            ["ollama", "list"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            lines = result.stdout.strip().split("\n")[1:]  # Skip header
+            for line in lines:
+                model_name = line.split()[0]
+                if "qwen" in model_name:
+                    return model_name
+            if lines:
+                return lines[0].split()[0]
+    except Exception:
+        pass
+    return "qwen3:1.7b"
 
 
 @dataclass
 class LLMConfig:
     base_url: str = field(default_factory=lambda: os.getenv("LLM_BASE_URL", "http://localhost:11434/v1"))
     api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", "ollama"))
-    model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "qwen3:8b"))
+    model: str = field(default_factory=lambda: os.getenv("LLM_MODEL") or _detect_model())
     temperature: float = field(default_factory=lambda: float(os.getenv("LLM_TEMPERATURE", "0.1")))
     max_tokens: int = field(default_factory=lambda: int(os.getenv("LLM_MAX_TOKENS", "4096")))
     timeout: int = field(default_factory=lambda: int(os.getenv("LLM_TIMEOUT", "120")))
