@@ -221,6 +221,15 @@ def sessions(args):
         print("Sessions cleaned.")
 
 
+def launch_gui(args):
+    """Launch Textual GUI."""
+    from chip.ui.textual_app import ChipApp
+    
+    model = args.model or "qwen3:1.7b"
+    app = ChipApp(model=model)
+    app.run()
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="chip",
@@ -229,6 +238,9 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Commands")
     
     subparsers.add_parser("setup", help="Install and configure Chip")
+    
+    gui_parser = subparsers.add_parser("gui", help="Launch Textual GUI")
+    gui_parser.add_argument("--model", type=str, help="Override LLM model")
     
     run_parser = subparsers.add_parser("run", help="Run a coding task")
     run_parser.add_argument("task", nargs="*", help="Task to execute")
@@ -248,6 +260,8 @@ def main():
     
     if args.command == "setup":
         setup(args)
+    elif args.command == "gui":
+        launch_gui(args)
     elif args.command == "run":
         run(args)
     elif args.command == "status":
