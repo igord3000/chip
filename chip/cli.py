@@ -1,64 +1,24 @@
-"""CLI entry point with single-command setup and launch."""
+"""Chip CLI — single command interface."""
 import argparse
 import subprocess
 import sys
-import os
+import json
 from pathlib import Path
 
 
-def check_ollama() -> bool:
-    """Check if Ollama is installed and running."""
+def ensure_ollama():
+    """Ensure Ollama is running, start if needed."""
     try:
         result = subprocess.run(
             ["ollama", "list"],
-            capture_output=True,
-            text=True,
-            timeout=5
+            capture_output=True, text=True, timeout=5
         )
-        return result.returncode == 0
+        if result.returncode == 0:
+            return True
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
-
-
-def install_ollama():
-    """Install Ollama."""
-    print("Installing Ollama...")
-    try:
-        subprocess.run(
-            "curl -fsSL https://ollama.ai/install.sh | sh",
-            shell=True,
-            check=True
-        )
-        print("Ollama installed successfully!")
-        return True
-    except subprocess.CalledProcessError:
-        print("Failed to install Ollama. Please install manually:")
-        print("  curl -fsSL https://ollama.ai/install.sh | sh")
-        return False
-
-
-def pull_model(model: str):
-    """Pull an Ollama model."""
-    print(f"Pulling model {model}...")
-    try:
-        subprocess.run(
-            ["ollama", "pull", model],
-            check=True
-        )
-        print(f"Model {model} ready!")
-        return True
-    except subprocess.CalledProcessError:
-        print(f"Failed to pull model {model}")
-        return False
-
-
-def start_ollama():
-    """Start Ollama server in background."""
-    if check_ollama():
-        print("Ollama is already running.")
-        return True
+        pass
     
-    print("Starting Ollama server...")
+    print("Starting Ollama...")
     try:
         subprocess.Popen(
             ["ollama", "serve"],
@@ -67,209 +27,149 @@ def start_ollama():
         )
         import time
         time.sleep(2)
-        return check_ollama()
+        return True
     except Exception:
+        print("Cannot start Ollama. Run: ollama serve")
         return False
 
 
-def setup(args=None):
-    """Full setup: install Ollama, pull model, configure."""
-    if args is None:
-        parser = argparse.ArgumentParser(
-            prog="chip setup",
-            description="Setup Chip agent"
-        )
-        parser.add_argument("--model", default="qwen3:8b", help="Model to download (default: qwen3:8b)")
-        parser.add_argument("--skip-ollama", action="store_true", help="Skip Ollama installation")
-        args = parser.parse_args()
-    
-    print("=" * 60)
-    print("Chip Agent Setup")
-    print("=" * 60)
-    
-    if not args.skip_ollama:
-        if not check_ollama():
-            if not install_ollama():
-                return False
-        else:
-            print("Ollama is already installed.")
-    
-    if not start_ollama():
-        print("Warning: Could not start Ollama server.")
-        print("You may need to start it manually: ollama serve")
-    
-    if not pull_model(args.model):
-        return False
-    
-    config_path = Path(".env")
-    if not config_path.exists():
-        with open(config_path, "w") as f:
-            f.write(f"""# Chip Configuration
-LLM_BASE_URL=http://localhost:11434/v1
-LLM_API_KEY=ollama
-LLM_MODEL={args.model}
-CONTEXT_MAX_TOKENS=32000
-""")
-        print(f"Created .env with model {args.model}")
-    
-    print("\n" + "=" * 60)
-    print("Setup complete! Run your first task:")
-    print(f'  chip run "Hello World"')
-    print("=" * 60)
-    return True
+def cmd_gui(args):
+    """Launch Textual GUI."""
+    from chip.ui.textual_app import ChipApp
+    app = ChipApp(model=args.model or "qwen3:1.7b")
+    app.run()
 
 
-def run(args=None):
-    """Run a task."""
-    if args is None:
-        parser = argparse.ArgumentParser(
-            prog="chip run",
-            description="Run a coding task"
-        )
-        parser.add_argument("task", nargs="*", help="Task to execute")
-        parser.add_argument("--model", type=str, help="Override LLM model")
-        parser.add_argument("--resume", type=str, help="Resume from checkpoint")
-        parser.add_argument("--chat", action="store_true", help="Interactive chat mode")
-        parser.add_argument("--max-turns", type=int, help="Max turns")
-        parser.add_argument("--timeout", type=int, help="LLM timeout in seconds")
-        args = parser.parse_args()
-    
+def cmd_chat(args):
+    """Launch CLI chat."""
     from chip.agent import Agent
     from chip.config import load_config
     
     config = load_config()
     if args.model:
         config.llm.model = args.model
-    if args.max_turns:
-        config.max_turns = args.max_turns
-    if args.timeout:
-        config.llm.timeout = args.timeout
     
     agent = Agent(config)
     
-    if args.chat:
-        agent.chat()
-    elif args.task:
+    if args.task:
         agent.run(" ".join(args.task), resume_from=args.resume)
     else:
         agent.chat()
 
 
-def status():
-    """Show status of Ollama and configuration."""
+def cmd_setup(args):
+    """Setup Chip."""
+    print("=" * 50)
+    print("  Chip Agent Setup")
+    print("=" * 50)
+    
+    # Install Ollama if needed
+    try:
+        subprocess.run(["ollama", "--version"], capture_output=True, check=True)
+        print("✓ Ollama installed")
+    except Exception:
+        print("Installing Ollama...")
+        subprocess.run("curl -fsSL https://ollama.ai/install.sh | sh", shell=True)
+    
+    # Start Ollama
+    ensure_ollama()
+    print("✓ Ollama running")
+    
+    # Pull model
+    model = args.model or "qwen3:1.7b"
+    print(f"Pulling {model}...")
+    subprocess.run(["ollama", "pull", model])
+    print(f"✓ Model {model} ready")
+    
+    # Create config
+    config_path = Path.home() / ".chip" / "config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    if not config_path.exists():
+        with open(config_path, "w") as f:
+            json.dump({"model": model}, f)
+    
+    print("\n✓ Setup complete!")
+    print(f"\nRun: chip")
+
+
+def cmd_status(args):
+    """Show status."""
     print("Chip Status")
-    print("=" * 40)
+    print("-" * 40)
     
-    ollama_ok = check_ollama()
-    print(f"Ollama: {'Running' if ollama_ok else 'Not running'}")
-    
-    if ollama_ok:
-        try:
-            result = subprocess.run(
-                ["ollama", "list"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            if result.stdout:
-                print("\nAvailable models:")
-                for line in result.stdout.strip().split("\n")[1:]:
-                    print(f"  {line}")
-        except Exception:
-            pass
-    
-    env_path = Path(".env")
-    if env_path.exists():
-        print(f"\n.env: {env_path.absolute()}")
-    else:
-        print("\n.env: Not found (using defaults)")
+    try:
+        result = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=5)
+        print("Ollama: Running")
+        if result.stdout:
+            for line in result.stdout.strip().split("\n")[1:]:
+                print(f"  {line}")
+    except Exception:
+        print("Ollama: Not running")
 
 
-def sessions(args):
+def cmd_sessions(args):
     """Manage sessions."""
-    checkpoint_dir = Path(".chip")
-    if not checkpoint_dir.exists():
-        print("No sessions found.")
-        return
+    checkpoint_dir = Path.home() / ".chip" / "sessions"
     
     if args.action == "list":
-        checkpoints = sorted(checkpoint_dir.glob("checkpoint_*.json"))
-        if not checkpoints:
-            print("No checkpoints found.")
+        if not checkpoint_dir.exists():
+            print("No sessions.")
             return
-        print("Sessions:")
-        for cp in checkpoints:
-            print(f"  {cp.name}")
-    
-    elif args.action == "show" and args.id:
-        cp_file = checkpoint_dir / args.id
-        if not cp_file.exists():
-            cp_file = checkpoint_dir / f"checkpoint_{args.id}.json"
-        if cp_file.exists():
-            import json
-            with open(cp_file) as f:
-                data = json.load(f)
-            print(f"Session: {cp_file.name}")
-            print(f"Timestamp: {data.get('timestamp', 'unknown')}")
-            print(f"Messages: {len(data.get('messages', []))}")
-        else:
-            print(f"Session not found: {args.id}")
+        for f in sorted(checkpoint_dir.glob("*.json"))[-5:]:
+            print(f"  {f.stem}")
     
     elif args.action == "clean":
         import shutil
-        shutil.rmtree(checkpoint_dir)
+        if checkpoint_dir.exists():
+            shutil.rmtree(checkpoint_dir)
         print("Sessions cleaned.")
-
-
-def launch_gui(args):
-    """Launch Textual GUI."""
-    from chip.ui.textual_app import ChipApp
-    
-    model = args.model or "qwen3:1.7b"
-    app = ChipApp(model=model)
-    app.run()
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog="chip",
-        description="Minimal coding agent with context tracking"
+        description="AI coding agent",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  chip                        # Launch GUI
+  chip -c                     # CLI chat mode
+  chip -c "Hello"             # CLI with task
+  chip -c -m qwen3:8b         # CLI with model
+  chip -c --resume            # Resume last session
+  chip -s                     # Setup
+  chip --status               # Show status
+"""
     )
-    subparsers = parser.add_subparsers(dest="command", help="Commands")
     
-    subparsers.add_parser("setup", help="Install and configure Chip")
-    
-    gui_parser = subparsers.add_parser("gui", help="Launch Textual GUI")
-    gui_parser.add_argument("--model", type=str, help="Override LLM model")
-    
-    run_parser = subparsers.add_parser("run", help="Run a coding task")
-    run_parser.add_argument("task", nargs="*", help="Task to execute")
-    run_parser.add_argument("--model", type=str, help="Override LLM model")
-    run_parser.add_argument("--resume", type=str, help="Resume from checkpoint")
-    run_parser.add_argument("--chat", action="store_true", help="Interactive chat mode")
-    run_parser.add_argument("--max-turns", type=int, help="Max turns")
-    run_parser.add_argument("--timeout", type=int, help="LLM timeout in seconds")
-    
-    subparsers.add_parser("status", help="Show system status")
-    
-    sessions_parser = subparsers.add_parser("sessions", help="Manage sessions")
-    sessions_parser.add_argument("action", choices=["list", "show", "clean"])
-    sessions_parser.add_argument("id", nargs="?")
+    parser.add_argument("-c", "--chat", action="store_true", help="CLI chat mode")
+    parser.add_argument("-g", "--gui", action="store_true", help="Launch GUI (default)")
+    parser.add_argument("-m", "--model", type=str, help="LLM model")
+    parser.add_argument("-r", "--resume", action="store_true", help="Resume last session")
+    parser.add_argument("-s", "--setup", action="store_true", help="Setup Chip")
+    parser.add_argument("--status", action="store_true", help="Show status")
+    parser.add_argument("--sessions", nargs="?", const="list", help="Manage sessions")
+    parser.add_argument("task", nargs="*", help="Task to execute")
     
     args = parser.parse_args()
     
-    if args.command == "setup":
-        setup(args)
-    elif args.command == "gui":
-        launch_gui(args)
-    elif args.command == "run":
-        run(args)
-    elif args.command == "status":
-        status()
-    elif args.command == "sessions":
-        sessions(args)
+    # No args = GUI
+    if not any([args.chat, args.setup, args.status, args.sessions, args.task]):
+        args.gui = True
+    
+    if args.setup:
+        cmd_setup(args)
+    elif args.status:
+        cmd_status(args)
+    elif args.sessions:
+        args.action = args.sessions
+        cmd_sessions(args)
+    elif args.chat:
+        ensure_ollama()
+        cmd_chat(args)
     else:
-        parser.print_help()
+        ensure_ollama()
+        cmd_gui(args)
 
 
 if __name__ == "__main__":
