@@ -9,6 +9,8 @@ from chip.context.tracker import ContextTracker
 from chip.context.checkpoint import CheckpointManager
 from chip.ui.terminal import TerminalUI
 from chip.subagent import SubagentManager
+from chip.memory import Memory
+from chip.recovery import ErrorRecovery
 
 
 SYSTEM_PROMPT = """\
@@ -53,6 +55,8 @@ class Agent:
             critical_threshold=self.config.context.critical_threshold,
         )
         self.checkpoint = CheckpointManager(self.config.checkpoint_dir)
+        self.memory = Memory(self.config.checkpoint_dir / "memory")
+        self.recovery = ErrorRecovery()
         self.messages: list[dict] = []
         self.project_context: str = ""
 
@@ -209,6 +213,27 @@ class Agent:
                     else:
                         chat_ui.print_info("No previous session found.")
                     continue
+                elif cmd.startswith("/remember"):
+                    fact = user_input[9:].strip()
+                    if fact:
+                        self.memory.remember(fact)
+                        chat_ui.print_info(f"Remembered: {fact}")
+                    else:
+                        chat_ui.print_info("Usage: /remember <fact>")
+                    continue
+                elif cmd.startswith("/recall"):
+                    query = user_input[7:].strip()
+                    if query:
+                        facts = self.memory.recall(query)
+                        if facts:
+                            chat_ui.print_info("Memories:")
+                            for f in facts:
+                                chat_ui.print_info(f"  • {f}")
+                        else:
+                            chat_ui.print_info("No memories found.")
+                    else:
+                        chat_ui.print_info("Usage: /recall <query>")
+                    continue
                 elif cmd == "/help":
                     self._show_help(chat_ui)
                     continue
@@ -234,7 +259,11 @@ class Agent:
             try:
                 response = self.llm.chat(self.messages, self.tools.to_openai_tools())
             except Exception as e:
+                suggestions = self.recovery.suggest_recovery(e)
                 chat_ui.print_error(f"LLM error: {e}")
+                chat_ui.print_info("Suggestions:")
+                for s in suggestions:
+                    chat_ui.print_info(f"  • {s}")
                 return
             
             if response.content:
@@ -292,6 +321,8 @@ Commands:
   /resume       - Load previous session
   /clear        - Clear context
   /sessions     - List saved sessions
+  /remember <fact> - Remember something
+  /recall <query>  - Recall memories
   /help         - Show this help
 """
         chat_ui.print_info(help_text)
