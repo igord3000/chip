@@ -232,6 +232,7 @@ def main():
     run_parser.add_argument("--model", type=str, help="Override LLM model")
     run_parser.add_argument("--resume", type=str, help="Resume from checkpoint")
     run_parser.add_argument("--max-turns", type=int, help="Max turns")
+    run_parser.add_argument("--timeout", type=int, help="LLM timeout in seconds")
     
     subparsers.add_parser("status", help="Show system status")
     
