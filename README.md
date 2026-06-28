@@ -6,7 +6,7 @@
 
 ```bash
 # Клонировать и запустить
-git clone https://github.com/alexey-goloburdin/chip && cd chip && pip install -e . && chip setup
+git clone https://github.com/igord3000/chip && cd chip && pip install -e . && chip setup
 ```
 
 ## Установка
@@ -15,7 +15,7 @@ git clone https://github.com/alexey-goloburdin/chip && cd chip && pip install -e
 
 ```bash
 # Клонировать репозиторий
-git clone https://github.com/alexey-goloburdin/chip
+git clone https://github.com/igord3000/chip
 cd chip
 
 # Установить зависимости

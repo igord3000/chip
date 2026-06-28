@@ -14,7 +14,7 @@ Minimal coding agent with context tracking and checkpoint system.
 
 ```bash
 # Clone repository
-git clone https://github.com/alexey-goloburdin/chip
+git clone https://github.com/igord3000/chip
 cd chip
 
 # Install dependencies
