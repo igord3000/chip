@@ -422,11 +422,11 @@ class ChipApp(App):
     
     def action_reload(self):
         """Reload the application."""
-        import os
+        import subprocess
         import sys
-        # Remove --reload from args to prevent infinite loop
-        args = [a for a in sys.argv if a != "--reload"]
-        os.execv(sys.executable, args)
+        # Start new process and exit current
+        subprocess.Popen([sys.executable, "-m", "chip"])
+        self.exit()
 
 
 def main():

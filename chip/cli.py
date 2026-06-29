@@ -115,12 +115,12 @@ def cmd_restart():
 
 def cmd_reload():
     """Reload Chip - restart the current process."""
-    import os
+    import subprocess
     import sys
     print("Перезапуск Chip...")
-    # Remove --reload from args to prevent infinite loop
-    args = [a for a in sys.argv if a != "--reload"]
-    os.execv(sys.executable, args)
+    # Start new process and exit current
+    subprocess.Popen([sys.executable, "-m", "chip"] + [a for a in sys.argv[2:] if a != "--reload"])
+    sys.exit(0)
 
 
 def cmd_providers():
