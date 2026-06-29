@@ -65,8 +65,8 @@ class ActivityPanel(Static):
         self._log_widget = None
     
     def compose(self) -> ComposeResult:
-        yield Label("[bold]Активность[/bold]", id="activity-title")
-        yield RichLog(id="activity-log", highlight=True, markup=True)
+        yield Label("[bold]Активность (Ctrl+C для копирования)[/bold]", id="activity-title")
+        yield RichLog(id="activity-log", highlight=True, markup=True, wrap=True)
     
     def log_event(self, message: str):
         """Add event to activity log."""

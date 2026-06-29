@@ -341,8 +341,9 @@ class Agent:
                             self.messages.append({
                                 "role": "tool",
                                 "tool_call_id": f"auto_fetch_{tool_call['id']}",
-                                "content": fetch_result.output
+                                "content": fetch_result.output[:1500] if len(fetch_result.output) > 1500 else fetch_result.output
                             })
+                            self.log_activity(f"  → Загружено: {len(fetch_result.output)} символов (обрезано)", "green")
                             chat_ui.print_tool_result(fetch_result.output[:200], True)
             
             tokens = self.tracker.update(self.messages)
