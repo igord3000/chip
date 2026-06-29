@@ -390,27 +390,33 @@ class ChipApp(App):
         self.log_activity(f"Сессия сохранена: {path}", "green")
     
     def action_copy_activity(self):
-        """Copy all activity log to clipboard."""
+        """Copy all activity log to clipboard or file."""
         try:
             activity = self.query_one("#activity-panel")
             text = activity.get_all_text()
-            if text:
-                # Try to use clipboard
+            if not text:
+                self.log_activity("Нет текста для копирования", "yellow")
+                return
+            
+            # Try xclip first
+            try:
                 import subprocess
                 process = subprocess.Popen(['xclip', '-selection', 'clipboard'], stdin=subprocess.PIPE)
                 process.communicate(text.encode())
-                self.log_activity("Текст скопирован в буфер обмена", "green")
-        except Exception:
-            # Fallback: save to file
-            try:
-                activity = self.query_one("#activity-panel")
-                text = activity.get_all_text()
-                log_file = Path.home() / ".chip" / "activity_log.txt"
-                with open(log_file, "w", encoding="utf-8") as f:
-                    f.write(text)
-                self.log_activity(f"Скопировано в {log_file}", "green")
-            except Exception as e:
-                self.log_activity(f"Ошибка копирования: {e}", "red")
+                self.log_activity("✓ Скопировано в буфер обмена", "green")
+                return
+            except Exception:
+                pass
+            
+            # Save to file in Windows-accessible path
+            log_file = Path("/mnt/c/Users/user/chip/activity_log.txt")
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_file, "w", encoding="utf-8") as f:
+                f.write(text)
+            self.log_activity(f"✓ Сохранено: {log_file}", "green")
+            
+        except Exception as e:
+            self.log_activity(f"Ошибка: {e}", "red")
     
     def action_reload(self):
         """Reload the application."""
