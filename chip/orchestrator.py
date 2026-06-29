@@ -9,6 +9,7 @@ from chip.llm import LLMClient
 from chip.tools import ToolRegistry
 from chip.router import QueryRouter, QueryType
 from chip.logger import get_logger
+from chip.data_extractor import DataExtractor
 
 
 @dataclass
@@ -33,6 +34,7 @@ class Orchestrator:
         self.tools = ToolRegistry(bash_timeout=self.config.bash_timeout)
         self.router = QueryRouter()
         self.log = get_logger()
+        self.extractor = DataExtractor()
     
     def _extract_city(self, query: str) -> Optional[str]:
         """Extract city name from query."""
@@ -46,8 +48,26 @@ class Orchestrator:
         for pattern in patterns:
             match = re.search(pattern, query)
             if match:
-                return match.group(1)
+                city = match.group(1)
+                # Filter out time-related words
+                if city.lower() not in ['неделю', 'месяц', 'завтра', 'сегодня', 'сейчас', 'утро', 'вечер', 'ночь']:
+                    return city
         return None
+    
+    def _extract_time_period(self, query: str) -> str:
+        """Extract time period from query."""
+        query_lower = query.lower()
+        
+        if any(w in query_lower for w in ['завтра', 'tomorrow']):
+            return 'tomorrow'
+        elif any(w in query_lower for w in ['на неделю', 'неделю', 'week']):
+            return 'week'
+        elif any(w in query_lower for w in ['на месяц', 'месяц', 'month']):
+            return 'month'
+        elif any(w in query_lower for w in ['сегодня', 'сейчас', 'today', 'now']):
+            return 'today'
+        else:
+            return 'today'  # Default to current weather
     
     def _get_wttr_url(self, city: str, days: int = 1) -> str:
         """Get wttr.in URL for weather."""
@@ -75,7 +95,8 @@ class Orchestrator:
         if query_type == QueryType.CURRENT_DATA:
             city = self._extract_city(query)
             if city and any(w in query.lower() for w in ['погод', 'weather']):
-                return self._handle_weather(city, query, callback)
+                time_period = self._extract_time_period(query)
+                return self._handle_weather(city, time_period, query, callback)
         
         # Step 2: Send to LLM with tools
         messages = [
@@ -177,22 +198,32 @@ class Orchestrator:
                 duration_ms=duration_ms
             )
     
-    def _handle_weather(self, city: str, query: str, callback: Optional[Callable] = None) -> OrchestratorResult:
+    def _handle_weather(self, city: str, time_period: str, query: str, callback: Optional[Callable] = None) -> OrchestratorResult:
         """Handle weather queries."""
         import time
         import re
         start_time = time.time()
         
-        self.log.info(f"Weather request for city: {city}")
+        self.log.info(f"Weather request for city: {city}, period: {time_period}")
         if callback:
-            callback(f"Город: {city}")
+            period_names = {'today': 'сейчас', 'tomorrow': 'завтра', 'week': 'на неделю', 'month': 'на месяц'}
+            callback(f"Город: {city}, период: {period_names.get(time_period, time_period)}")
         
         try:
-            # Search for weather
-            search_query = f"погода в {city} сейчас температура"
+            # Build search query based on time period
+            if time_period == 'tomorrow':
+                search_query = f"погода в {city} завтра прогноз температура"
+            elif time_period == 'week':
+                search_query = f"погода в {city} на неделю прогноз температура"
+            elif time_period == 'month':
+                search_query = f"погода в {city} на месяц прогноз температура"
+            else:
+                search_query = f"погода в {city} сейчас температура"
+            
             self.log.info(f"Searching: {search_query}")
             if callback:
-                callback(f"Поиск погоды в {city}...")
+                period_names = {'today': 'сейчас', 'tomorrow': 'завтра', 'week': 'на неделю', 'month': 'на месяц'}
+                callback(f"Поиск погоды в {city} {period_names.get(time_period, '')}...")
             
             search_result = self.tools.call("web_search", {"query": search_query, "num_results": 5})
             
@@ -202,8 +233,19 @@ class Orchestrator:
                     answer=f"Не удалось найти погоду для {city}"
                 )
             
-            # Extract weather data from search results
-            weather_data = self._extract_weather_from_search(search_result.output, city)
+            # Check if search results contain weather data
+            weather_data = self._extract_weather_from_search(search_result.output, city, time_period)
+            
+            # If no data extracted (e.g., for tomorrow/week/month), fetch the page
+            if 'Не удалось' in weather_data or len(weather_data) < 100:
+                if callback:
+                    callback(f"Загрузка страницы с прогнозом...")
+                
+                first_url = self._extract_first_url(search_result.output)
+                if first_url:
+                    fetch_result = self.tools.call("web_fetch", {"url": first_url, "format": "text"})
+                    if fetch_result.success:
+                        weather_data = self._extract_weather_from_search(fetch_result.output, city, time_period)
             
             duration_ms = int((time.time() - start_time) * 1000)
             
@@ -221,7 +263,7 @@ class Orchestrator:
                 answer=f"Ошибка при получении погоды: {e}"
             )
     
-    def _extract_weather_from_search(self, search_text: str, city: str) -> str:
+    def _extract_weather_from_search(self, search_text: str, city: str, time_period: str) -> str:
         """Extract weather data from search results."""
         import re
         
@@ -234,12 +276,12 @@ class Orchestrator:
             # Look for temperature
             temp_match = re.search(r'температура[^+]*([+-]?\d+)', line, re.IGNORECASE)
             if temp_match:
-                weather_info.append(f"Температура: {temp_match.group(1)}°C")
+                weather_info.append(f"Температура: +{temp_match.group(1)}°C")
             
             # Look for "feels like"
             feels_match = re.search(r'ощущается[^+]*([+-]?\d+)', line, re.IGNORECASE)
             if feels_match:
-                weather_info.append(f"Ощущается как: {feels_match.group(1)}°C")
+                weather_info.append(f"Ощущается как: +{feels_match.group(1)}°C")
             
             # Look for wind
             wind_match = re.search(r'ветер[^0-9]*(\d+[,.]?\d*)\s*(м/с|км/ч)', line, re.IGNORECASE)
@@ -257,12 +299,10 @@ class Orchestrator:
                 weather_info.append(f"Давление: {pres_match.group(1)} {pres_match.group(2)}")
             
             # Look for weather condition
-            if 'облачно' in line.lower() or 'ясно' in line.lower() or 'дождь' in line.lower() or 'снег' in line.lower():
-                # Extract the condition
-                for condition in ['облачно с прояснениями', 'облачно', 'ясно', 'дождь', 'снег', 'пасмурно']:
-                    if condition in line.lower():
-                        weather_info.append(f"Погода: {condition}")
-                        break
+            for condition in ['облачно с прояснениями', 'облачно', 'ясно', 'дождь', 'снег', 'пасмурно', 'гроза', 'ливень']:
+                if condition in line.lower():
+                    weather_info.append(f"Погода: {condition}")
+                    break
         
         if weather_info:
             # Remove duplicates
@@ -273,7 +313,11 @@ class Orchestrator:
                     seen.add(item)
                     unique_info.append(item)
             
-            return f"Погода в {city}:\n" + "\n".join(unique_info)
+            # Add time period header
+            period_names = {'today': 'сейчас', 'tomorrow': 'завтра', 'week': 'на неделю', 'month': 'на месяц'}
+            header = f"Погода в {city} {period_names.get(time_period, '')}:"
+            
+            return header + "\n" + "\n".join(unique_info)
         
         # If no structured data found, return raw snippet
         for line in lines:
