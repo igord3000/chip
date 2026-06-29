@@ -67,13 +67,15 @@ class ActivityPanel(Static):
     
     def compose(self) -> ComposeResult:
         yield Label("[bold]Активность (Ctrl+Shift+C для копирования)[/bold]", id="activity-title")
-        yield RichLog(id="activity-log", highlight=True, markup=True, wrap=True, allow_select=True)
+        yield RichLog(id="activity-log", highlight=True, markup=True, wrap=True)
     
     def log_event(self, message: str):
         """Add event to activity log."""
         if self._log_widget is None:
             try:
                 self._log_widget = self.query_one("#activity-log")
+                # Enable text selection after mount
+                self._log_widget.allow_select = True
             except Exception:
                 return
         self._log_lines.append(message)
