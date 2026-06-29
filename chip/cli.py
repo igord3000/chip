@@ -107,6 +107,12 @@ def cmd_status(args):
         print("Ollama: Not running")
 
 
+def cmd_restart():
+    """Restart Ollama."""
+    from chip.ollama_service import restart_ollama
+    restart_ollama()
+
+
 def cmd_sessions(args):
     """Manage sessions."""
     checkpoint_dir = Path.home() / ".chip" / "sessions"
@@ -148,17 +154,20 @@ Examples:
     parser.add_argument("-r", "--resume", action="store_true", help="Resume last session")
     parser.add_argument("-s", "--setup", action="store_true", help="Setup Chip")
     parser.add_argument("--status", action="store_true", help="Show status")
+    parser.add_argument("--restart", action="store_true", help="Restart Ollama")
     parser.add_argument("--sessions", nargs="?", const="list", help="Manage sessions")
     parser.add_argument("task", nargs="*", help="Task to execute")
     
     args = parser.parse_args()
     
     # No args = GUI
-    if not any([args.chat, args.setup, args.status, args.sessions, args.task]):
+    if not any([args.chat, args.setup, args.status, args.sessions, args.task, args.restart]):
         args.gui = True
     
     if args.setup:
         cmd_setup(args)
+    elif args.restart:
+        cmd_restart()
     elif args.status:
         cmd_status(args)
     elif args.sessions:

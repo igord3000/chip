@@ -7,7 +7,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, ScrollableContainer
 from textual.widgets import (
     Header, Footer, Static, Input, Button,
-    DataTable, Label, ProgressBar, RichLog
+    DataTable, Label, ProgressBar, RichLog, LoadingIndicator
 )
 from textual.binding import Binding
 from textual import on
@@ -173,6 +173,7 @@ class ChipApp(App):
             return
         
         input_widget.value = ""
+        input_widget.disabled = True
         
         # Add user message to UI
         chat_container = self.query_one("#chat-container")
@@ -190,11 +191,21 @@ class ChipApp(App):
             self.cache_hits += 1
             chat_container.mount(ChatMessage("assistant", f"[cached] {cached}"))
             self._update_status()
+            input_widget.disabled = False
+            input_widget.focus()
             return
+        
+        # Show loading indicator
+        loading = LoadingIndicator()
+        chat_container.mount(loading)
+        chat_container.scroll_end()
         
         # Get response from LLM
         try:
             response = self.llm.chat(self.messages, self.tools.to_openai_tools())
+            
+            # Remove loading indicator
+            loading.remove()
             
             if response.content:
                 chat_container.mount(ChatMessage("assistant", response.content))
@@ -229,10 +240,13 @@ class ChipApp(App):
             self._update_status()
             
         except Exception as e:
+            loading.remove()
             chat_container.mount(ChatMessage("assistant", f"[red]Error: {e}[/red]"))
         
         # Scroll to bottom
         chat_container.scroll_end()
+        input_widget.disabled = False
+        input_widget.focus()
     
     def _update_status(self):
         """Update status bar."""
