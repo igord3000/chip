@@ -116,10 +116,16 @@ class ChipApp(App):
         padding: 1;
     }
     
-    #settings-panel {
+    #settings-scroll {
         height: 1fr;
         overflow-y: auto;
         padding: 1;
+    }
+    
+    .section {
+        margin-top: 1;
+        margin-bottom: 0;
+        color: $accent;
     }
     
     #input-container {
@@ -167,10 +173,10 @@ class ChipApp(App):
         Binding("ctrl+r", "reload", "Reload"),
     ]
     
-    def __init__(self, model: str = "qwen3:1.7b"):
+    def __init__(self, model: str = None):
         super().__init__()
-        self.model = model
         self.config = load_config()
+        self.model = model or self.config.llm.model
         self.llm = LLMClient(self.config.llm)
         self.tools = ToolRegistry(bash_timeout=self.config.bash_timeout)
         self.tracker = ContextTracker(max_tokens=32000)
@@ -385,7 +391,7 @@ class ChipApp(App):
 
 def main():
     import sys
-    model = sys.argv[1] if len(sys.argv) > 1 else "qwen3:1.7b"
+    model = sys.argv[1] if len(sys.argv) > 1 else None
     app = ChipApp(model=model)
     app.run()
 
