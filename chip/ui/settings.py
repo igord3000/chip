@@ -92,6 +92,12 @@ class SettingsScreen(Static):
             yield Label(f"Записей: {cache_count}")
             yield Button("Очистить", id="clear-cache-btn")
             
+            # Max tokens
+            yield Label("\nМакс. токенов в ответе:", classes="section-header")
+            with Horizontal():
+                yield Input(value=str(self.config.llm.max_tokens), id="max-tokens-input", width=10)
+                yield Label("(для OpenRouter: 1024-2048)")
+            
             # Apply button
             yield Label("")
             yield Button("Применить и перезапустить", id="apply-btn", variant="success")
@@ -255,9 +261,18 @@ class SettingsScreen(Static):
         """Save config to file."""
         config_path = Path.home() / ".chip" / "config.json"
         config_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Get max_tokens from input
+        try:
+            max_tokens_input = self.query_one("#max-tokens-input")
+            self.config.llm.max_tokens = int(max_tokens_input.value)
+        except (ValueError, AttributeError):
+            pass
+        
         with open(config_path, "w") as f:
             json.dump({
                 "model": self.config.llm.model,
                 "base_url": self.config.llm.base_url,
                 "api_key": self.config.llm.api_key,
+                "max_tokens": self.config.llm.max_tokens,
             }, f)

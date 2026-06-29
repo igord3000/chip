@@ -44,8 +44,8 @@ class LLMConfig:
     base_url: str = field(default_factory=lambda: os.getenv("LLM_BASE_URL", "http://localhost:11434/v1"))
     api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", "ollama"))
     model: str = field(default_factory=lambda: os.getenv("LLM_MODEL") or _detect_model())
-    temperature: float = field(default_factory=lambda: float(os.getenv("LLM_TEMPERATURE", "0.1")))
-    max_tokens: int = field(default_factory=lambda: int(os.getenv("LLM_MAX_TOKENS", "4096")))
+    temperature: float = field(default_factory=lambda: float(os.getenv("LLM_TEMPERATURE", "0.7")))
+    max_tokens: int = field(default_factory=lambda: int(os.getenv("LLM_MAX_TOKENS", "1024")))
     timeout: int = field(default_factory=lambda: int(os.getenv("LLM_TIMEOUT", "120")))
 
 
@@ -79,5 +79,7 @@ def load_config() -> AgentConfig:
             config.llm.base_url = saved["base_url"]
         if "api_key" in saved:
             config.llm.api_key = saved["api_key"]
+        if "max_tokens" in saved:
+            config.llm.max_tokens = saved["max_tokens"]
     
     return config
