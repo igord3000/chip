@@ -11,6 +11,7 @@ from textual.widgets import (
 )
 from textual.binding import Binding
 from textual import on
+from textual.events import Key
 
 from chip.config import load_config
 from chip.llm import LLMClient
@@ -81,6 +82,13 @@ class ToolCallWidget(Static):
         yield Label(f"[{result_style}]{truncated}[/{result_style}]", classes="tool-result")
 
 
+class LoadingWidget(Static):
+    """Visible loading indicator."""
+    
+    def compose(self) -> ComposeResult:
+        yield Label("[bold yellow]⏳ Думаю...[/bold yellow]")
+
+
 class ChipApp(App):
     """Main Chip application."""
     
@@ -96,14 +104,22 @@ class ChipApp(App):
     }
     
     #input-container {
-        height: 3;
-        padding: 0 1;
+        height: auto;
+        min-height: 3;
+        max-height: 5;
+        padding: 1;
         background: $surface;
         border-top: solid $primary;
     }
     
     #user-input {
         width: 1fr;
+        height: 3;
+    }
+    
+    #send-btn {
+        width: auto;
+        min-width: 8;
     }
     
     .msg-header {
@@ -126,6 +142,12 @@ class ChipApp(App):
     .tool-result {
         padding-left: 2;
         margin-bottom: 1;
+    }
+    
+    LoadingWidget {
+        height: 1;
+        padding: 0 1;
+        background: $accent-darken-1;
     }
     
     StatusBar {
@@ -159,8 +181,8 @@ class ChipApp(App):
         yield StatusBar(self.model)
         yield ScrollableContainer(id="chat-container")
         with Horizontal(id="input-container"):
-            yield Input(placeholder="Type your message...", id="user-input")
-            yield Button("Send", id="send-btn", variant="primary")
+            yield Input(placeholder="Введите сообщение... (Enter - отправить)", id="user-input")
+            yield Button("Отправить", id="send-btn", variant="primary")
     
     @on(Input.Submitted, "#user-input")
     @on(Button.Pressed, "#send-btn")
@@ -196,7 +218,7 @@ class ChipApp(App):
             return
         
         # Show loading indicator
-        loading = LoadingIndicator()
+        loading = LoadingWidget()
         chat_container.mount(loading)
         chat_container.scroll_end()
         
