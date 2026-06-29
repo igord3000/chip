@@ -6,7 +6,7 @@ from typing import Optional
 
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, Horizontal
-from textual.widgets import Static, Label, Button, Input, Select, LoadingIndicator
+from textual.widgets import Static, Label, Button, Input, Select, Checkbox
 from textual.binding import Binding
 from textual import on
 
@@ -73,6 +73,9 @@ class SettingsScreen(Static):
                 yield Button("Загрузить модели", id="load-models-btn", variant="primary")
                 yield Button("Проверить", id="test-model-btn")
             
+            # Filter free models
+            yield Checkbox("Только бесплатные модели", id="free-only-checkbox", value=True)
+            
             # Models dropdown (will be populated)
             yield Label("", id="models-label")
             yield Select([], id="model-select", prompt="Модели не загружены")
@@ -95,7 +98,7 @@ class SettingsScreen(Static):
             # Max tokens
             yield Label("\nМакс. токенов в ответе:", classes="section-header")
             with Horizontal():
-                yield Input(value=str(self.config.llm.max_tokens), id="max-tokens-input", width=10)
+                yield Input(value=str(self.config.llm.max_tokens), id="max-tokens-input")
                 yield Label("(для OpenRouter: 1024-2048)")
             
             # Apply button
@@ -124,10 +127,15 @@ class SettingsScreen(Static):
             return
         
         models = fetch_models(self._current_provider, provider.api_key)
+        
+        # Filter free models if checkbox is checked
+        free_only = self.query_one("#free-only-checkbox").value
+        if free_only:
+            models = [m for m in models if ":free" in m.id or m.size == "free" or m.size == ""]
+        
         self._cloud_models = models
         
         if models:
-            # Update the select widget
             select = self.query_one("#model-select")
             model_options = [(f"{m.name} ({m.size})" if m.size else m.name, m.id) for m in models]
             select.set_options(model_options)
