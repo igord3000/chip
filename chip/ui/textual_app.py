@@ -6,7 +6,7 @@ from typing import Optional
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, ScrollableContainer
 from textual.widgets import (
-    Header, Footer, Static, Input, Button, Label, RichLog
+    Header, Footer, Static, Input, Button, Label, RichLog, Markdown
 )
 from textual.binding import Binding
 from textual import on
