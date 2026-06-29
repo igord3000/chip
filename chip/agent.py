@@ -11,30 +11,40 @@ from chip.ui.terminal import TerminalUI
 from chip.subagent import SubagentManager
 from chip.memory import Memory
 from chip.recovery import ErrorRecovery
+from chip.router import QueryRouter, QueryType
 
 
 SYSTEM_PROMPT = """\
-Ты — coding-агент с доступом в интернет. Твоя задача — помогать пользователю с программированием и поиском информации.
+Ты — Chip, умный AI-ассистент. Твоя задача — давать точные и полезные ответы.
 
 У тебя есть инструменты:
 - `bash` — выполнять команды shell
 - `read_file` — читать файлы
 - `write_file` — записывать файлы
 - `list_files` — список файлов
-- `subagent` — запускать подзадачи параллельно
-- `web_fetch` — загружать страницы по URL
-- `web_search` — искать в интернете через DuckDuckGo
+- `web_search` — искать в интернете
+- `web_fetch` — читать страницы по URL
 - `download` — скачивать файлы
 
-Как работать:
-1. Определи что нужно сделать
-2. Используй инструменты для поиска информации, чтения файлов, написания кода
-3. Для поиска информации используй web_search
-4. Для чтения страниц используй web_fetch
-5. Для сложных задач используй subagent
-6. Дай финальный ответ на русском языке
+ВАЖНЫЕ ПРАВИЛА:
 
-Отвечай кратко и по-русски. Объясняй что делаешь перед каждой командой."""
+1. ОПРЕДЕЛИ ТИП ЗАПРОСА:
+   - Текущие данные (погода, курсы, новости) → СНАЧАЛА web_search, ПОТОМ web_fetch, ИЗВЛЕКИ данные
+   - Знания (что такое Python) → ОТВЕТЬ из своих знаний, НЕ ищи в интернете
+   - Код (напиши скрипт) → ИСПОЛЬЗУЙ инструменты
+   - Файлы (прочитай файл) → ИСПОЛЬЗУЙ read_file
+
+2. ПРИ ПОИСКЕ ИНФОРМАЦИИ:
+   - Вызови web_search для поиска
+   - Затем ВСЕГДА вызови web_fetch для чтения найденной страницы
+   - Извлеки конкретные данные (числа, факты, текст)
+   - НЕ показывай просто ссылки — покажи СОДЕРЖАНИЕ
+
+3. ОТВЕЧАЙ:
+   - На русском языке
+   - Кратко и по существу
+   - С конкретными фактами и цифрами
+   - Без воды и общих фраз"""
 
 
 class Agent:
@@ -55,6 +65,7 @@ class Agent:
         self.checkpoint = CheckpointManager(self.config.checkpoint_dir)
         self.memory = Memory(self.config.checkpoint_dir / "memory")
         self.recovery = ErrorRecovery()
+        self.router = QueryRouter()
         self.messages: list[dict] = []
         self.project_context: str = ""
 
@@ -245,13 +256,20 @@ class Agent:
 
     def _process_message_with_ui(self, user_message: str, chat_ui):
         """Process message with chat UI."""
+        # Route query and get hint
+        query_type = self.router.route(user_message)
+        hint = self.router.get_prompt_hint(query_type)
+        
+        # Add hint to user message for LLM
+        enhanced_message = f"{user_message}\n\n[Системная подсказка: {hint}]" if hint else user_message
+        
         if not self.messages:
             self.messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_message}
+                {"role": "user", "content": enhanced_message}
             ]
         else:
-            self.messages.append({"role": "user", "content": user_message})
+            self.messages.append({"role": "user", "content": enhanced_message})
         
         for turn in range(1, self.config.max_turns + 1):
             try:
