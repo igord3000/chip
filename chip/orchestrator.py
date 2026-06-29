@@ -1,13 +1,13 @@
-"""Orchestrator - coordinates main agent and subagents."""
+"""Orchestrator - routes LLM tool calls to real APIs."""
 import json
-from typing import Optional
-from dataclasses import dataclass
+import time
+from typing import Optional, Callable
+from dataclasses import dataclass, field
 
 from chip.config import AgentConfig, load_config
 from chip.llm import LLMClient
 from chip.tools import ToolRegistry
 from chip.router import QueryRouter, QueryType
-from chip.subagent import SubagentManager
 from chip.logger import get_logger
 
 
@@ -15,93 +15,70 @@ from chip.logger import get_logger
 class OrchestratorResult:
     success: bool
     answer: str
-    subtasks: list[str] = None
-    subtask_results: list[str] = None
+    tools_called: list[str] = field(default_factory=list)
+    duration_ms: int = 0
 
 
 class Orchestrator:
-    """Orchestrator that decides when to use subagents."""
+    """
+    Orchestrator follows the golden rule:
+    - LLM THINKS: chooses function + fills arguments (generates JSON)
+    - Orchestrator ACTS: calls real API with that JSON
+    - LLM ANSWERS: converts raw data to human-readable text
+    """
     
     def __init__(self, config: Optional[AgentConfig] = None):
         self.config = config or load_config()
         self.llm = LLMClient(self.config.llm)
         self.tools = ToolRegistry(bash_timeout=self.config.bash_timeout)
         self.router = QueryRouter()
-        self.subagent_manager = SubagentManager(self.config)
         self.log = get_logger()
     
-    def should_use_subagents(self, query: str) -> bool:
-        """Determine if query needs parallel subagents."""
-        query_lower = query.lower()
+    def execute(self, query: str, callback: Optional[Callable] = None) -> OrchestratorResult:
+        """Execute query following the orchestrator pattern."""
+        start_time = time.time()
+        tools_called = []
         
-        # Complex queries that benefit from parallel execution
-        indicators = [
-            "и также", "а также", "кроме того", "помимо этого",
-            "параллельно", "одновременно", "сравни", "сделай несколько",
-            "research", "compare", "analyze multiple"
-        ]
+        self.log.info(f"Orchestrator: '{query}'")
         
-        for indicator in indicators:
-            if indicator in query_lower:
-                return True
-        
-        # If query has multiple distinct parts
-        if query_lower.count("?") > 1:
-            return True
-        
-        return False
-    
-    def split_into_subtasks(self, query: str) -> list[str]:
-        """Split complex query into subtasks."""
-        # Simple heuristic: split by "и", "а также", etc.
-        parts = []
-        
-        for separator in [" и ", " а также ", " кроме того ", " также "]:
-            if separator in query.lower():
-                parts = [p.strip() for p in query.split(separator) if p.strip()]
-                break
-        
-        if not parts:
-            parts = [query]
-        
-        return parts
-    
-    def execute(self, query: str, callback=None) -> OrchestratorResult:
-        """Execute query, using subagents if needed."""
-        self.log.info(f"Orchestrator: processing '{query}'")
-        
-        # Check if we should use subagents
-        if self.should_use_subagents(query):
-            self.log.info("Query is complex - using subagents")
-            return self._execute_with_subagents(query, callback)
-        else:
-            self.log.info("Query is simple - single execution")
-            return self._execute_single(query, callback)
-    
-    def _execute_single(self, query: str, callback=None) -> OrchestratorResult:
-        """Execute single query."""
+        # Step 1: Route query
         query_type = self.router.route(query)
         hint = self.router.get_prompt_hint(query_type)
+        self.log.info(f"Query type: {query_type.value}")
         
+        if callback:
+            callback(f"Тип запроса: {query_type.value}")
+        
+        # Step 2: Send to LLM with tools
         messages = [
-            {"role": "system", "content": "Ты помощник. Отвечай кратко и по существу на русском. Не показывай ссылки - показывай данные. Если вызвал инструмент - обобщи результат."},
-            {"role": "user", "content": f"{query}\n\n[Подсказка: {hint}]" if hint else query}
+            {"role": "system", "content": self._get_system_prompt(query_type)},
+            {"role": "user", "content": f"{query}\n\n[Hint: {hint}]" if hint else query}
         ]
         
-        self.log.info(f"Single execution: query_type={query_type.value}")
-        
         try:
+            # LLM THINKS: generates tool call JSON
             response = self.llm.chat(messages, self.tools.to_openai_tools())
+            self.log.info(f"LLM response: content={len(response.content or '')} chars, tools={len(response.tool_calls)}")
             
-            # Handle tool calls
+            # Step 3: If LLM wants to call tools - ORCHESTRATOR ACTS
             if response.tool_calls:
                 for tool_call in response.tool_calls:
                     func_name = tool_call["function"]["name"]
                     arguments = json.loads(tool_call["function"]["arguments"])
                     
-                    self.log.info(f"Tool call: {func_name}")
-                    result = self.tools.call(func_name, arguments)
+                    self.log.info(f"Tool call: {func_name}({arguments})")
+                    if callback:
+                        callback(f"Вызов: {func_name}")
                     
+                    # Orchestrator executes the real API
+                    result = self.tools.call(func_name, arguments)
+                    tools_called.append(func_name)
+                    
+                    self.log.info(f"Tool result: {result.output[:100]}...")
+                    if callback:
+                        callback(f"Результат: {result.output[:150]}...")
+                    
+                    # Add to context
                     messages.append({
                         "role": "assistant",
                         "content": response.content or None,
@@ -115,35 +92,38 @@ class Orchestrator:
                     
                     # Auto-pipeline: web_search -> web_fetch
                     if func_name == "web_search" and result.success:
-                        import re
-                        urls = re.findall(r'https?://[^\s\)]+', result.output)
-                        if urls:
-                            fetch_result = self.tools.call("web_fetch", {"url": urls[0], "format": "text"})
+                        first_url = self._extract_first_url(result.output)
+                        if first_url:
+                            self.log.info(f"Auto-fetch: {first_url}")
+                            if callback:
+                                callback(f"Загрузка: {first_url}")
+                            
+                            fetch_result = self.tools.call("web_fetch", {"url": first_url, "format": "text"})
                             if fetch_result.success:
-                                truncated = fetch_result.output[:2000]
                                 messages.append({
                                     "role": "assistant",
                                     "content": None,
                                     "tool_calls": [{
                                         "id": f"auto_{tool_call['id']}",
                                         "type": "function",
-                                        "function": {"name": "web_fetch", "arguments": json.dumps({"url": urls[0]})}
+                                        "function": {"name": "web_fetch", "arguments": json.dumps({"url": first_url})}
                                     }]
                                 })
                                 messages.append({
                                     "role": "tool",
                                     "tool_call_id": f"auto_{tool_call['id']}",
-                                    "content": truncated
+                                    "content": fetch_result.output[:2000]
                                 })
+                                tools_called.append("web_fetch")
                 
-                # Get final answer after tool calls
+                # Step 4: LLM ANSWERS - converts data to human text
                 messages.append({
                     "role": "user",
-                    "content": "Теперь дай финальный ответ на основе полученных данных. Кратко и по существу."
+                    "content": "Дай финальный ответ на основе полученных данных. Кратко и по существу. Не показывай ссылки."
                 })
                 response = self.llm.chat(messages)
             
-            # If still no content, try one more time
+            # If still no content, ask LLM to answer
             if not response.content:
                 messages.append({
                     "role": "user",
@@ -151,49 +131,46 @@ class Orchestrator:
                 })
                 response = self.llm.chat(messages)
             
+            duration_ms = int((time.time() - start_time) * 1000)
+            
             return OrchestratorResult(
                 success=True,
-                answer=response.content or "Не удалось получить ответ"
+                answer=response.content or "Не удалось получить ответ",
+                tools_called=tools_called,
+                duration_ms=duration_ms
             )
             
         except Exception as e:
-            self.log.error(f"Execution error: {e}", e)
-            return OrchestratorResult(success=False, answer=f"Ошибка: {e}")
+            self.log.error(f"Orchestrator error: {e}", e)
+            duration_ms = int((time.time() - start_time) * 1000)
+            return OrchestratorResult(
+                success=False,
+                answer=f"Ошибка: {e}",
+                duration_ms=duration_ms
+            )
     
-    def _execute_with_subagents(self, query: str, callback=None) -> OrchestratorResult:
-        """Execute query using parallel subagents."""
-        subtasks = self.split_into_subtasks(query)
-        self.log.info(f"Split into {len(subtasks)} subtasks: {subtasks}")
-        
-        # Execute subtasks in parallel
-        results = self.subagent_manager.run_parallel(subtasks)
-        
-        # Collect results
-        subtask_results = []
-        for i, result in enumerate(results):
-            status = "✓" if result.success else "✗"
-            subtask_results.append(f"{status} {subtasks[i]}: {result.output[:200]}")
-        
-        # Synthesize final answer
-        combined_results = "\n".join(subtask_results)
-        
-        messages = [
-            {"role": "system", "content": "Ты помощник. Обобщи результаты подзадач в один ответ на русском."},
-            {"role": "user", "content": f"Оригинальный запрос: {query}\n\nРезультаты подзадач:\n{combined_results}"}
-        ]
-        
-        try:
-            response = self.llm.chat(messages)
-            return OrchestratorResult(
-                success=True,
-                answer=response.content or combined_results,
-                subtasks=subtasks,
-                subtask_results=subtask_results
-            )
-        except Exception as e:
-            return OrchestratorResult(
-                success=True,
-                answer=combined_results,
-                subtasks=subtasks,
-                subtask_results=subtask_results
-            )
+    def _get_system_prompt(self, query_type: QueryType) -> str:
+        """Get system prompt based on query type."""
+        prompts = {
+            QueryType.CONVERSATION: "Ты помощник. Отвечай дружелюбно и кратко.",
+            QueryType.KNOWLEDGE: "Ты помощник. Отвечай из своих знаний, кратко.",
+            QueryType.CURRENT_DATA: """Ты помощник с доступом к актуальным данным.
+
+ПРАВИЛА:
+1. Сначала вызови web_search для поиска
+2. Затем web_fetch для чтения страницы
+3. Извлеки КОКРЕТНЫЕ данные: температуру, дату, числа
+4. Дай ответ на основе ПОЛУЧЕННЫХ данных, а не из своих знаний
+5. Не пиши "у меня нет доступа" - у тебя есть инструменты!
+6. Формат ответа: цифры, факты, кратко""",
+            QueryType.CODE: "Ты coding-помощник. Используй инструменты для написания и запуска кода.",
+            QueryType.FILE_OP: "Ты помощник. Используй инструменты для работы с файлами.",
+            QueryType.SEARCH: "Ты помощник. Найди информацию и кратко изложи ключевые факты.",
+        }
+        return prompts.get(query_type, "Ты помощник. Отвечай кратко и по существу.")
+    
+    def _extract_first_url(self, text: str) -> Optional[str]:
+        """Extract first URL from text."""
+        import re
+        urls = re.findall(r'https?://[^\s\)]+', text)
+        return urls[0] if urls else None

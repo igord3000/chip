@@ -294,7 +294,8 @@ class Agent:
             entry.id,
             response=result.answer,
             success=result.success,
-            duration_ms=duration_ms
+            duration_ms=duration_ms,
+            tools_used=result.tools_called
         )
         
         # Show answer
