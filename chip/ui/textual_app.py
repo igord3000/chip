@@ -1,4 +1,4 @@
-"""Textual-based GUI for Chip agent."""
+"""Textual-based GUI for Chip agent with activity panel."""
 import json
 from pathlib import Path
 from typing import Optional
@@ -6,12 +6,10 @@ from typing import Optional
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, ScrollableContainer
 from textual.widgets import (
-    Header, Footer, Static, Input, Button,
-    DataTable, Label, ProgressBar, RichLog, LoadingIndicator
+    Header, Footer, Static, Input, Button, Label, RichLog
 )
 from textual.binding import Binding
 from textual import on
-from textual.events import Key
 
 from chip.config import load_config
 from chip.llm import LLMClient
@@ -39,7 +37,6 @@ class StatusBar(Static):
         self.tokens_used = tokens_used
         self.tokens_total = tokens_total
         self.cache_hits = cache_hits
-        
         percent = (tokens_used / tokens_total * 100) if tokens_total > 0 else 0
         self.query_one("#tokens-label").update(f"Tokens: {tokens_used}/{tokens_total} ({percent:.0f}%)")
         self.query_one("#cache-label").update(f"Cache: {cache_hits} hits")
@@ -60,33 +57,22 @@ class ChatMessage(Static):
         yield Label(self.content, classes="msg-content")
 
 
-class ToolCallWidget(Static):
-    """Display a tool call."""
+class ActivityPanel(Static):
+    """Right panel showing LLM activity."""
     
-    def __init__(self, tool_name: str, arguments: dict, result: str):
+    def __init__(self):
         super().__init__()
-        self.tool_name = tool_name
-        self.arguments = arguments
-        self.result = result
+        self.log = None
     
     def compose(self) -> ComposeResult:
-        args_str = json.dumps(self.arguments, ensure_ascii=False)
-        if len(args_str) > 100:
-            args_str = args_str[:100] + "..."
-        
-        yield Label(f"[yellow]🔧 {self.tool_name}[/yellow]", classes="tool-header")
-        yield Label(f"[dim]{args_str}[/dim]", classes="tool-args")
-        
-        result_style = "green" if "Error" not in self.result else "red"
-        truncated = self.result[:200] + "..." if len(self.result) > 200 else self.result
-        yield Label(f"[{result_style}]{truncated}[/{result_style}]", classes="tool-result")
-
-
-class LoadingWidget(Static):
-    """Visible loading indicator."""
+        yield Label("[bold]Активность[/bold]", id="activity-title")
+        yield RichLog(id="activity-log", highlight=True, markup=True)
     
-    def compose(self) -> ComposeResult:
-        yield Label("[bold yellow]⏳ Думаю...[/bold yellow]")
+    def log_event(self, message: str):
+        """Add event to activity log."""
+        if self.log is None:
+            self.log = self.query_one("#activity-log")
+        self.log.write(message)
 
 
 class ChipApp(App):
@@ -94,7 +80,31 @@ class ChipApp(App):
     
     CSS = """
     Screen {
+        layout: horizontal;
+    }
+    
+    #main-panel {
+        width: 2fr;
+        height: 1fr;
         layout: vertical;
+    }
+    
+    #activity-panel {
+        width: 1fr;
+        height: 1fr;
+        border-left: solid $primary;
+        padding: 1;
+    }
+    
+    #activity-title {
+        dock: top;
+        text-align: center;
+        background: $accent-darken-2;
+        color: white;
+    }
+    
+    #activity-log {
+        height: 1fr;
     }
     
     #chat-container {
@@ -131,27 +141,6 @@ class ChipApp(App):
         padding-left: 2;
     }
     
-    .tool-header {
-        margin-top: 0;
-    }
-    
-    .tool-args {
-        padding-left: 2;
-    }
-    
-    .tool-result {
-        padding-left: 2;
-        margin-bottom: 1;
-    }
-    
-    LoadingWidget {
-        dock: bottom;
-        height: 1;
-        padding: 0 1;
-        background: $accent-darken-1;
-        text-align: center;
-    }
-    
     StatusBar {
         dock: top;
         height: 1;
@@ -178,13 +167,29 @@ class ChipApp(App):
         self.semantic_cache = SemanticCache()
         self.messages: list[dict] = []
         self.cache_hits = 0
+        self.activity: Optional[ActivityPanel] = None
     
     def compose(self) -> ComposeResult:
         yield StatusBar(self.model)
-        yield ScrollableContainer(id="chat-container")
-        with Horizontal(id="input-container"):
-            yield Input(placeholder="Введите сообщение...", id="user-input")
-            yield Button("Отправить", id="send-btn", variant="primary")
+        with Horizontal():
+            with Vertical(id="main-panel"):
+                yield ScrollableContainer(id="chat-container")
+                with Horizontal(id="input-container"):
+                    yield Input(placeholder="Введите сообщение...", id="user-input")
+                    yield Button("Отправить", id="send-btn", variant="primary")
+            yield ActivityPanel(id="activity-panel")
+    
+    def log_activity(self, message: str, style: str = ""):
+        """Log activity to side panel."""
+        if self.activity is None:
+            try:
+                self.activity = self.query_one("#activity-panel")
+            except Exception:
+                return
+        
+        if style:
+            message = f"[{style}]{message}[/{style}]"
+        self.activity.log_event(message)
     
     @on(Input.Submitted, "#user-input")
     @on(Button.Pressed, "#send-btn")
@@ -198,15 +203,14 @@ class ChipApp(App):
         
         input_widget.value = ""
         
-        # Add user message to UI
         chat_container = self.query_one("#chat-container")
         chat_container.mount(ChatMessage("user", message))
         chat_container.scroll_end()
         
-        # Add to messages
         self.messages.append({"role": "user", "content": message})
+        self.log_activity(f"Запрос: {message}", "bold cyan")
         
-        # Check cache first
+        # Check cache
         cached = self.response_cache.get(self.messages)
         if not cached:
             cached = self.semantic_cache.get(message)
@@ -215,38 +219,34 @@ class ChipApp(App):
             self.cache_hits += 1
             chat_container.mount(ChatMessage("assistant", f"[cached] {cached}"))
             chat_container.scroll_end()
+            self.log_activity("Ответ из кэша", "green")
             self._update_status()
             return
         
-        # Show loading indicator at top
-        loading = LoadingWidget()
-        self.screen.mount(loading)
+        self.log_activity("LLM думает...", "yellow")
         
         # Get response from LLM
         try:
             response = self.llm.chat(self.messages, self.tools.to_openai_tools())
             
-            # Remove loading indicator
-            loading.remove()
-            
             if response.content:
                 chat_container.mount(ChatMessage("assistant", response.content))
                 self.messages.append({"role": "assistant", "content": response.content})
-                
-                # Cache the response
                 self.response_cache.set(self.messages, response.content)
                 self.semantic_cache.set(message, response.content)
+                self.log_activity(f"Ответ: {response.content[:100]}...", "green")
             
             # Handle tool calls
             for tool_call in (response.tool_calls or []):
                 func_name = tool_call["function"]["name"]
                 arguments = json.loads(tool_call["function"]["arguments"])
                 
+                self.log_activity(f"Инструмент: {func_name}", "yellow")
+                self.log_activity(f"  Args: {json.dumps(arguments, ensure_ascii=False)[:100]}", "dim")
+                
                 result = self.tools.call(func_name, arguments)
                 
-                chat_container.mount(ToolCallWidget(
-                    func_name, arguments, result.output
-                ))
+                self.log_activity(f"  Результат: {result.output[:150]}...", "dim" if result.success else "red")
                 
                 self.messages.append({
                     "role": "assistant",
@@ -258,27 +258,54 @@ class ChipApp(App):
                     "tool_call_id": tool_call["id"],
                     "content": result.output
                 })
+                
+                # AUTO-PIPELINE: web_search -> web_fetch
+                if func_name == "web_search" and result.success:
+                    first_url = self._extract_first_url(result.output)
+                    if first_url:
+                        self.log_activity(f"  → Авто-загрузка: {first_url}", "cyan")
+                        fetch_result = self.tools.call("web_fetch", {"url": first_url, "format": "text"})
+                        
+                        if fetch_result.success:
+                            self.messages.append({
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [{
+                                    "id": f"auto_{tool_call['id']}",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "web_fetch",
+                                        "arguments": json.dumps({"url": first_url})
+                                    }
+                                }]
+                            })
+                            self.messages.append({
+                                "role": "tool",
+                                "tool_call_id": f"auto_{tool_call['id']}",
+                                "content": fetch_result.output
+                            })
+                            self.log_activity(f"  → Загружено: {len(fetch_result.output)} символов", "green")
             
             self._update_status()
             
         except Exception as e:
-            loading.remove()
+            self.log_activity(f"Ошибка: {e}", "red")
             chat_container.mount(ChatMessage("assistant", f"[red]Error: {e}[/red]"))
         
-        # Scroll to bottom
         chat_container.scroll_end()
+    
+    def _extract_first_url(self, text: str) -> Optional[str]:
+        """Extract first URL from text."""
+        import re
+        urls = re.findall(r'https?://[^\s\)]+', text)
+        return urls[0] if urls else None
     
     def _update_status(self):
         """Update status bar."""
         tokens = self.tracker.update(self.messages)
         stats = self.response_cache.stats()
-        
         status_bar = self.query_one(StatusBar)
-        status_bar.update_stats(
-            tokens_used=tokens,
-            tokens_total=self.tracker.max_tokens,
-            cache_hits=self.cache_hits
-        )
+        status_bar.update_stats(tokens, self.tracker.max_tokens, self.cache_hits)
     
     def action_clear_chat(self):
         """Clear chat history."""
@@ -292,20 +319,13 @@ class ChipApp(App):
     def action_save_session(self):
         """Save current session."""
         from chip.context.checkpoint import CheckpointManager
-        
-        checkpoint_dir = self.config.checkpoint_dir
-        manager = CheckpointManager(checkpoint_dir)
-        path = manager.save(self.messages, "", {"tokens_used": self.tracker.current_tokens})
-        
-        chat_container = self.query_one("#chat-container")
-        chat_container.mount(ChatMessage("assistant", f"Session saved: {path}"))
-        chat_container.scroll_end()
+        manager = CheckpointManager(self.config.checkpoint_dir)
+        path = manager.save(self.messages, "", {"tokens": self.tracker.current_tokens})
+        self.log_activity(f"Сессия сохранена: {path}", "green")
 
 
 def main():
-    """Run the Chip Textual app."""
     import sys
-    
     model = sys.argv[1] if len(sys.argv) > 1 else "qwen3:1.7b"
     app = ChipApp(model=model)
     app.run()
