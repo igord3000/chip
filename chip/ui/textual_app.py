@@ -60,8 +60,8 @@ class ChatMessage(Static):
 class ActivityPanel(Static):
     """Right panel showing LLM activity."""
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self.log = None
     
     def compose(self) -> ComposeResult:
