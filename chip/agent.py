@@ -12,6 +12,7 @@ from chip.subagent import SubagentManager
 from chip.memory import Memory
 from chip.recovery import ErrorRecovery
 from chip.router import QueryRouter, QueryType
+from chip.logger import get_logger
 
 
 SYSTEM_PROMPT = """\
@@ -258,9 +259,15 @@ class Agent:
 
     def _process_message_with_ui(self, user_message: str, chat_ui):
         """Process message with chat UI."""
+        log = get_logger()
+        
         # Route query and get hint
         query_type = self.router.route(user_message)
         hint = self.router.get_prompt_hint(query_type)
+        
+        log.info(f"Query: {user_message}")
+        log.info(f"Query type: {query_type.value}")
+        log.info(f"Hint: {hint}")
         
         # Add hint to user message for LLM
         enhanced_message = f"{user_message}\n\n[Системная подсказка: {hint}]" if hint else user_message
@@ -274,9 +281,12 @@ class Agent:
             self.messages.append({"role": "user", "content": enhanced_message})
         
         for turn in range(1, self.config.max_turns + 1):
+            log.info(f"Turn {turn}: Calling LLM...")
+            
             try:
                 response = self.llm.chat(self.messages, self.tools.to_openai_tools())
             except Exception as e:
+                log.error(f"LLM error: {e}", e)
                 suggestions = self.recovery.suggest_recovery(e)
                 chat_ui.print_error(f"LLM error: {e}")
                 chat_ui.print_info("Suggestions:")
@@ -284,10 +294,13 @@ class Agent:
                     chat_ui.print_info(f"  • {s}")
                 return
             
+            log.info(f"LLM response: content={response.content[:100] if response.content else 'None'}, tool_calls={len(response.tool_calls)}")
+            
             if response.content:
                 chat_ui.print_assistant_message(response.content)
             
             if not response.tool_calls:
+                log.info("No tool calls - returning response")
                 tokens = self.tracker.update(self.messages)
                 chat_ui.print_token_bar(self.tracker)
                 return
