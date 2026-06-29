@@ -218,6 +218,9 @@ class Agent:
                 elif cmd == "/sessions":
                     self._show_sessions(chat_ui)
                     continue
+                elif cmd == "/history":
+                    self._show_history(chat_ui)
+                    continue
                 elif cmd == "/resume":
                     self._load_last_session()
                     if self.messages:
@@ -260,6 +263,11 @@ class Agent:
     def _process_message_with_ui(self, user_message: str, chat_ui):
         """Process message with chat UI."""
         log = get_logger()
+        from chip.history import QueryHistory
+        from chip.orchestrator import Orchestrator
+        
+        history = QueryHistory()
+        orchestrator = Orchestrator(self.config)
         
         # Route query and get hint
         query_type = self.router.route(user_message)
@@ -267,26 +275,38 @@ class Agent:
         
         log.info(f"Query: {user_message}")
         log.info(f"Query type: {query_type.value}")
-        log.info(f"Hint: {hint}")
         
-        # Add hint to user message for LLM
-        enhanced_message = f"{user_message}\n\n[Системная подсказка: {hint}]" if hint else user_message
+        # Create history entry
+        entry = history.create_entry(user_message, query_type.value)
         
-        if not self.messages:
-            self.messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": enhanced_message}
-            ]
-        else:
-            self.messages.append({"role": "user", "content": enhanced_message})
+        # Use orchestrator for execution
+        start_time = __import__('time').time()
         
-        for turn in range(1, self.config.max_turns + 1):
-            log.info(f"Turn {turn}: Calling LLM...")
-            
-            try:
-                response = self.llm.chat(self.messages, self.tools.to_openai_tools())
-            except Exception as e:
-                log.error(f"LLM error: {e}", e)
+        if chat_ui:
+            chat_ui.print_info(f"Тип: {query_type.value}")
+        
+        result = orchestrator.execute(user_message, callback=lambda msg: chat_ui.print_info(msg) if chat_ui else None)
+        
+        duration_ms = int((__import__('time').time() - start_time) * 1000)
+        
+        # Update history
+        history.update_entry(
+            entry.id,
+            response=result.answer,
+            success=result.success,
+            duration_ms=duration_ms
+        )
+        
+        # Show answer
+        if chat_ui:
+            chat_ui.print_assistant_message(result.answer)
+        
+        # Update messages for context
+        self.messages.append({"role": "user", "content": user_message})
+        self.messages.append({"role": "assistant", "content": result.answer})
+        
+        log.info(f"Response: {result.answer[:200]}...")
+        log.info(f"Duration: {duration_ms}ms")
                 suggestions = self.recovery.suggest_recovery(e)
                 chat_ui.print_error(f"LLM error: {e}")
                 chat_ui.print_info("Suggestions:")
@@ -375,6 +395,21 @@ class Agent:
         for cp in checkpoints[-5:]:
             chat_ui.print_info(f"  {cp.name}")
 
+    def _show_history(self, chat_ui):
+        """Show query history."""
+        from chip.history import QueryHistory
+        history = QueryHistory()
+        recent = history.get_recent(10)
+        
+        if not recent:
+            chat_ui.print_info("No query history.")
+            return
+        
+        chat_ui.print_info("Last queries:")
+        for entry in recent:
+            status = "✓" if entry.success else "✗"
+            chat_ui.print_info(f"  {status} [{entry.query_type}] {entry.query[:50]}")
+
     def _extract_first_url(self, text: str) -> Optional[str]:
         """Extract first URL from search results."""
         import re
@@ -392,6 +427,7 @@ Commands:
   /resume       - Load previous session
   /clear        - Clear context
   /sessions     - List saved sessions
+  /history      - Show query history
   /remember <fact> - Remember something
   /recall <query>  - Recall memories
   /help         - Show this help
