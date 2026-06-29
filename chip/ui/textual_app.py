@@ -63,10 +63,11 @@ class ActivityPanel(Static):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._log_widget = None
+        self._log_lines = []
     
     def compose(self) -> ComposeResult:
-        yield Label("[bold]Активность (Ctrl+C для копирования)[/bold]", id="activity-title")
-        yield RichLog(id="activity-log", highlight=True, markup=True, wrap=True)
+        yield Label("[bold]Активность (Ctrl+Shift+C для копирования)[/bold]", id="activity-title")
+        yield RichLog(id="activity-log", highlight=True, markup=True, wrap=True, allow_select=True)
     
     def log_event(self, message: str):
         """Add event to activity log."""
@@ -75,7 +76,12 @@ class ActivityPanel(Static):
                 self._log_widget = self.query_one("#activity-log")
             except Exception:
                 return
+        self._log_lines.append(message)
         self._log_widget.write(message)
+    
+    def get_all_text(self) -> str:
+        """Get all log text for copying."""
+        return "\n".join(self._log_lines)
 
 
 class ChipApp(App):
@@ -171,6 +177,7 @@ class ChipApp(App):
         Binding("ctrl+s", "save_session", "Save"),
         Binding("ctrl+comma", "show_settings", "Settings"),
         Binding("ctrl+r", "reload", "Reload"),
+        Binding("ctrl+shift+c", "copy_activity", "Copy Log"),
     ]
     
     def __init__(self, model: str = None):
@@ -381,6 +388,29 @@ class ChipApp(App):
         manager = CheckpointManager(self.config.checkpoint_dir)
         path = manager.save(self.messages, "", {"tokens": self.tracker.current_tokens})
         self.log_activity(f"Сессия сохранена: {path}", "green")
+    
+    def action_copy_activity(self):
+        """Copy all activity log to clipboard."""
+        try:
+            activity = self.query_one("#activity-panel")
+            text = activity.get_all_text()
+            if text:
+                # Try to use clipboard
+                import subprocess
+                process = subprocess.Popen(['xclip', '-selection', 'clipboard'], stdin=subprocess.PIPE)
+                process.communicate(text.encode())
+                self.log_activity("Текст скопирован в буфер обмена", "green")
+        except Exception:
+            # Fallback: save to file
+            try:
+                activity = self.query_one("#activity-panel")
+                text = activity.get_all_text()
+                log_file = Path.home() / ".chip" / "activity_log.txt"
+                with open(log_file, "w", encoding="utf-8") as f:
+                    f.write(text)
+                self.log_activity(f"Скопировано в {log_file}", "green")
+            except Exception as e:
+                self.log_activity(f"Ошибка копирования: {e}", "red")
     
     def action_reload(self):
         """Reload the application."""
