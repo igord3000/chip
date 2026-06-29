@@ -22,8 +22,7 @@ def test_orchestrator():
         "Какая погода в Миассе сегодня?",
         "Какая погода в Миассе на неделю и на месяц?",
         "Что такое Python и как его установить?",
-        "Найди информацию про Ollama и покажи как установить",
-        "Привет, как дела?",  # Simple query - no subagents
+        "Привет, как дела?",
     ]
     
     for query in queries:
@@ -31,24 +30,13 @@ def test_orchestrator():
         print(f"Query: {query}")
         print(f"{'─' * 60}")
         
-        # Check if should use subagents
-        use_sub = orch.should_use_subagents(query)
-        print(f"Use subagents: {use_sub}")
-        
-        if use_sub:
-            subtasks = orch.split_into_subtasks(query)
-            print(f"Subtasks: {subtasks}")
-        
-        # Execute
-        result = orch.execute(query)
+        # Execute with orchestrator
+        result = orch.execute(query, callback=lambda msg: print(f"  → {msg}"))
         
         print(f"Success: {result.success}")
+        print(f"Tools used: {result.tools_called}")
+        print(f"Duration: {result.duration_ms}ms")
         print(f"Answer: {result.answer[:300]}...")
-        
-        if result.subtasks:
-            print(f"Subtask results:")
-            for r in (result.subtask_results or []):
-                print(f"  {r[:100]}...")
     
     print(f"\n{'=' * 60}")
     print("Test completed!")
