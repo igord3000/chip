@@ -6,7 +6,7 @@ from typing import Optional
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, ScrollableContainer
 from textual.widgets import (
-    Header, Footer, Static, Input, Button, Label, RichLog, Markdown
+    Header, Footer, Static, Input, Button, Label, RichLog
 )
 from textual.binding import Binding
 from textual import on
@@ -52,11 +52,8 @@ class ChatMessage(Static):
         style = "bold cyan" if self.role == "user" else "bold green"
         icon = "👤" if self.role == "user" else "🤖"
         yield Label(f"[{style}]{icon} {self.role.upper()}[/{style}]", classes="msg-header")
-        # Use Markdown for proper formatting
-        if "```" in self.content or "•" in self.content or "\n" in self.content:
-            yield Label(Markdown(self.content), classes="msg-content")
-        else:
-            yield Label(self.content, classes="msg-content")
+        # Show content as plain text with Rich markup
+        yield Label(self.content, classes="msg-content")
 
 
 class ActivityPanel(Static):
