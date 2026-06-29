@@ -60,12 +60,6 @@ class UniversalAgent:
 2. Используй списки с • или нумерацией
 3. Разделяй секции пустой строкой
 4. Не пиши всё в одну строку
-5. Формат:
-   - Краткое вступление (1 строка)
-   - Пустая строка
-   - Основная информация (списком)
-   - Пустая строка
-   - Дополнительные детали
 
 ПРИМЕР ХОРОШЕГО ОТВЕТА:
 Python — язык программирования.
@@ -76,6 +70,13 @@ Python — язык программирования.
 
 Используется для веб-разработки, анализа данных и AI.
 
+ВАЖНО ДЛЯ УТОЧНЕНИЙ:
+Если пользователь задаёт уточняющий вопрос (например "а у диллеров?", "а где купить?", "а какие модели?"):
+- ПОСМОТРИ на предыдущий контекст диалога
+- ПОНЯМИ что именно уточняется
+- Сформулируй ПОЛНЫЙ запрос для поиска
+- Например: "а у диллеров?" → "цены на Веста у дилеров в миассе"
+
 ПРАВИЛА ИНСТРУМЕНТОВ:
 - "что такое X" → ответь из знаний
 - "найди/поищи" → web_search
@@ -84,7 +85,7 @@ Python — язык программирования.
 - "напиши код" → write_file
 - "прочитай файл" → read_file"""
     
-    def execute(self, query: str, callback: Optional[Callable] = None) -> AgentResult:
+    def execute(self, query: str, callback: Optional[Callable] = None, history: Optional[list[dict]] = None) -> AgentResult:
         """Execute any query using LLM + tools."""
         start_time = time.time()
         tools_called = []
@@ -94,11 +95,16 @@ Python — язык программирования.
         if callback:
             callback("Обработка запроса...")
         
-        # Build messages
+        # Build messages with history
         messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": query}
+            {"role": "system", "content": self.system_prompt}
         ]
+        
+        # Add conversation history for context
+        if history:
+            messages.extend(history[-10:])  # Last 10 messages for context
+        
+        messages.append({"role": "user", "content": query})
         
         try:
             # Main loop: LLM decides, agent executes
