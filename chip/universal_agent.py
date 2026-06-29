@@ -85,6 +85,39 @@ Python — язык программирования.
 - "напиши код" → write_file
 - "прочитай файл" → read_file"""
     
+    def _preprocess_query(self, query: str, history: Optional[list[dict]] = None) -> str:
+        """Preprocess query to handle follow-ups."""
+        if not history:
+            return query
+        
+        # Get last assistant message for context
+        last_assistant = ""
+        for msg in reversed(history):
+            if msg.get("role") == "assistant":
+                last_assistant = msg.get("content", "")
+                break
+        
+        if not last_assistant:
+            return query
+        
+        # Check if this is a follow-up question
+        follow_up_indicators = [
+            "а ", "а что", "а где", "а как", "а когда",
+            "а какие", "а какой", "а какая", "а какое",
+            "а у ", "а в ", "а на ", "а для ",
+            "расскажи еще", "подробнее", "детальнее",
+        ]
+        
+        is_follow_up = any(indicator in query.lower() for indicator in follow_up_indicators)
+        
+        if is_follow_up:
+            # Prepend context from last exchange
+            context = f"Контекст: {last_assistant[:200]}\n\nУточнение: {query}"
+            self.log.info(f"Follow-up detected, adding context")
+            return context
+        
+        return query
+    
     def execute(self, query: str, callback: Optional[Callable] = None, history: Optional[list[dict]] = None) -> AgentResult:
         """Execute any query using LLM + tools."""
         start_time = time.time()
@@ -93,18 +126,20 @@ Python — язык программирования.
         self.log.info(f"Agent: '{query}'")
         
         if callback:
-            callback("Обработка запроса...")
+            callback("Обработка...")
         
-        # Build messages with history
+        # Build messages with context
         messages = [
             {"role": "system", "content": self.system_prompt}
         ]
         
-        # Add conversation history for context
+        # Add conversation history (last 8 exchanges = 16 messages)
         if history:
-            messages.extend(history[-10:])  # Last 10 messages for context
+            messages.extend(history[-16:])
         
-        messages.append({"role": "user", "content": query})
+        # Preprocess query for follow-ups
+        processed_query = self._preprocess_query(query, history)
+        messages.append({"role": "user", "content": processed_query})
         
         try:
             # Main loop: LLM decides, agent executes
