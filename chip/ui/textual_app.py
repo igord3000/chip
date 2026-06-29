@@ -157,6 +157,7 @@ class ChipApp(App):
         Binding("ctrl+q", "quit", "Quit"),
         Binding("ctrl+c", "clear_chat", "Clear"),
         Binding("ctrl+s", "save_session", "Save"),
+        Binding("ctrl+comma", "show_settings", "Settings"),
     ]
     
     def __init__(self, model: str = "qwen3:1.7b"):
@@ -171,6 +172,7 @@ class ChipApp(App):
         self.messages: list[dict] = []
         self.cache_hits = 0
         self.activity: Optional[ActivityPanel] = None
+        self.showing_settings = False
     
     def compose(self) -> ComposeResult:
         yield StatusBar(self.model)
@@ -180,6 +182,7 @@ class ChipApp(App):
                 with Horizontal(id="input-container"):
                     yield Input(placeholder="Введите сообщение...", id="user-input")
                     yield Button("Отправить", id="send-btn", variant="primary")
+                    yield Button("⚙", id="settings-btn", variant="default")
             yield ActivityPanel(id="activity-panel")
     
     def log_activity(self, message: str, style: str = ""):
@@ -193,6 +196,32 @@ class ChipApp(App):
         if style:
             message = f"[{style}]{message}[/{style}]"
         self.activity.log_event(message)
+    
+    @on(Button.Pressed, "#settings-btn")
+    def handle_settings(self):
+        """Toggle settings panel."""
+        self.action_show_settings()
+    
+    def action_show_settings(self):
+        """Show settings screen."""
+        from chip.ui.settings import SettingsScreen
+        
+        chat_container = self.query_one("#chat-container")
+        
+        if self.showing_settings:
+            # Remove settings, show chat
+            for child in chat_container.children:
+                if isinstance(child, SettingsScreen):
+                    child.remove()
+            self.showing_settings = False
+        else:
+            # Hide chat messages, show settings
+            for child in chat_container.children:
+                child.display = False
+            
+            settings = SettingsScreen(self.config)
+            chat_container.mount(settings)
+            self.showing_settings = True
     
     @on(Input.Submitted, "#user-input")
     @on(Button.Pressed, "#send-btn")
