@@ -118,9 +118,19 @@ def cmd_reload():
     import subprocess
     import sys
     print("Перезапуск Chip...")
-    # Start new process and exit current
     subprocess.Popen([sys.executable, "-m", "chip"] + [a for a in sys.argv[2:] if a != "--reload"])
     sys.exit(0)
+
+
+def cmd_pull(model: str):
+    """Pull an Ollama model."""
+    import subprocess
+    print(f"Скачивание модели {model}...")
+    try:
+        subprocess.run(["ollama", "pull", model], check=True)
+        print(f"✓ Модель {model} готова!")
+    except subprocess.CalledProcessError:
+        print(f"✗ Ошибка при скачивании {model}")
 
 
 def cmd_providers():
@@ -184,6 +194,7 @@ Examples:
     parser.add_argument("--restart", action="store_true", help="Restart Ollama")
     parser.add_argument("--reload", action="store_true", help="Reload Chip (restart GUI)")
     parser.add_argument("--providers", action="store_true", help="List providers")
+    parser.add_argument("--pull", type=str, help="Pull Ollama model")
     parser.add_argument("--sessions", nargs="?", const="list", help="Manage sessions")
     parser.add_argument("task", nargs="*", help="Task to execute")
     
@@ -201,6 +212,8 @@ Examples:
         cmd_reload()
     elif args.providers:
         cmd_providers()
+    elif args.pull:
+        cmd_pull(args.pull)
     elif args.status:
         cmd_status(args)
     elif args.sessions:

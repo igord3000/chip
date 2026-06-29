@@ -287,13 +287,13 @@ class ChipApp(App):
             self._update_status()
             return
         
-        self.log_activity("LLM думает...", "yellow")
+        self.log_activity("Обработка...", "yellow")
         
-        # Use orchestrator for proper tool execution
-        from chip.orchestrator import Orchestrator
-        orchestrator = Orchestrator(self.config)
+        # Use universal agent
+        from chip.universal_agent import UniversalAgent
+        agent = UniversalAgent(self.config)
         
-        result = orchestrator.execute(message, callback=lambda msg: self.log_activity(msg, "cyan"))
+        result = agent.execute(message, callback=lambda msg: self.log_activity(msg, "cyan"))
         
         if result.success:
             chat_container.mount(ChatMessage("assistant", result.answer))
