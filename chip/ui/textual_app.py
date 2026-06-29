@@ -52,7 +52,11 @@ class ChatMessage(Static):
         style = "bold cyan" if self.role == "user" else "bold green"
         icon = "👤" if self.role == "user" else "🤖"
         yield Label(f"[{style}]{icon} {self.role.upper()}[/{style}]", classes="msg-header")
-        yield Label(self.content, classes="msg-content")
+        # Use Markdown for proper formatting
+        if "```" in self.content or "•" in self.content or "\n" in self.content:
+            yield Label(Markdown(self.content), classes="msg-content")
+        else:
+            yield Label(self.content, classes="msg-content")
 
 
 class ActivityPanel(Static):
