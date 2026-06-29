@@ -12,8 +12,6 @@ from textual.binding import Binding
 from textual import on
 
 from chip.config import load_config
-from chip.llm import LLMClient
-from chip.tools import ToolRegistry
 from chip.context.tracker import ContextTracker
 from chip.cache import ResponseCache, SemanticCache
 
@@ -186,8 +184,6 @@ class ChipApp(App):
         super().__init__()
         self.config = load_config()
         self.model = model or self.config.llm.model
-        self.llm = LLMClient(self.config.llm)
-        self.tools = ToolRegistry(bash_timeout=self.config.bash_timeout)
         self.tracker = ContextTracker(max_tokens=32000)
         self.response_cache = ResponseCache(Path.home() / ".chip" / "cache")
         self.semantic_cache = SemanticCache()
@@ -293,80 +289,22 @@ class ChipApp(App):
         
         self.log_activity("LLM думает...", "yellow")
         
-        # Get response from LLM
-        try:
-            response = self.llm.chat(self.messages, self.tools.to_openai_tools())
-            
-            if response.content:
-                chat_container.mount(ChatMessage("assistant", response.content))
-                self.messages.append({"role": "assistant", "content": response.content})
-                self.response_cache.set(self.messages, response.content)
-                self.semantic_cache.set(message, response.content)
-                self.log_activity(f"Ответ: {response.content[:100]}...", "green")
-            
-            # Handle tool calls
-            for tool_call in (response.tool_calls or []):
-                func_name = tool_call["function"]["name"]
-                arguments = json.loads(tool_call["function"]["arguments"])
-                
-                self.log_activity(f"Инструмент: {func_name}", "yellow")
-                self.log_activity(f"  Args: {json.dumps(arguments, ensure_ascii=False)[:100]}", "dim")
-                
-                result = self.tools.call(func_name, arguments)
-                
-                self.log_activity(f"  Результат: {result.output[:150]}...", "dim" if result.success else "red")
-                
-                self.messages.append({
-                    "role": "assistant",
-                    "content": response.content or None,
-                    "tool_calls": [tool_call]
-                })
-                self.messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call["id"],
-                    "content": result.output
-                })
-                
-                # AUTO-PIPELINE: web_search -> web_fetch
-                if func_name == "web_search" and result.success:
-                    first_url = self._extract_first_url(result.output)
-                    if first_url:
-                        self.log_activity(f"  → Авто-загрузка: {first_url}", "cyan")
-                        fetch_result = self.tools.call("web_fetch", {"url": first_url, "format": "text"})
-                        
-                        if fetch_result.success:
-                            self.messages.append({
-                                "role": "assistant",
-                                "content": None,
-                                "tool_calls": [{
-                                    "id": f"auto_{tool_call['id']}",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "web_fetch",
-                                        "arguments": json.dumps({"url": first_url})
-                                    }
-                                }]
-                            })
-                            self.messages.append({
-                                "role": "tool",
-                                "tool_call_id": f"auto_{tool_call['id']}",
-                                "content": fetch_result.output
-                            })
-                            self.log_activity(f"  → Загружено: {len(fetch_result.output)} символов", "green")
-            
-            self._update_status()
-            
-        except Exception as e:
-            self.log_activity(f"Ошибка: {e}", "red")
-            chat_container.mount(ChatMessage("assistant", f"[red]Error: {e}[/red]"))
+        # Use orchestrator for proper tool execution
+        from chip.orchestrator import Orchestrator
+        orchestrator = Orchestrator(self.config)
         
-        chat_container.scroll_end()
-    
-    def _extract_first_url(self, text: str) -> Optional[str]:
-        """Extract first URL from text."""
-        import re
-        urls = re.findall(r'https?://[^\s\)]+', text)
-        return urls[0] if urls else None
+        result = orchestrator.execute(message, callback=lambda msg: self.log_activity(msg, "cyan"))
+        
+        if result.success:
+            chat_container.mount(ChatMessage("assistant", result.answer))
+            self.messages.append({"role": "assistant", "content": result.answer})
+            self.response_cache.set(self.messages, result.answer)
+            self.semantic_cache.set(message, result.answer)
+            
+            if result.tools_called:
+                self.log_activity(f"Инструменты: {', '.join(result.tools_called)}", "green")
+        
+        self._update_status()
     
     def _update_status(self):
         """Update status bar."""
