@@ -62,7 +62,7 @@ class ActivityPanel(Static):
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.log = None
+        self._log_widget = None
     
     def compose(self) -> ComposeResult:
         yield Label("[bold]Активность[/bold]", id="activity-title")
@@ -70,9 +70,12 @@ class ActivityPanel(Static):
     
     def log_event(self, message: str):
         """Add event to activity log."""
-        if self.log is None:
-            self.log = self.query_one("#activity-log")
-        self.log.write(message)
+        if self._log_widget is None:
+            try:
+                self._log_widget = self.query_one("#activity-log")
+            except Exception:
+                return
+        self._log_widget.write(message)
 
 
 class ChipApp(App):
