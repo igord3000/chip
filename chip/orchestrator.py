@@ -34,6 +34,28 @@ class Orchestrator:
         self.router = QueryRouter()
         self.log = get_logger()
     
+    def _extract_city(self, query: str) -> Optional[str]:
+        """Extract city name from query."""
+        import re
+        # Common patterns for city in Russian
+        patterns = [
+            r'в ([А-Яа-яёЁ]+)',
+            r'в ([А-Яа-яёЁ]+(?:-[А-Яа-яёЁ]+)?)',
+            r'на ([А-Яа-яёЁ]+)',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, query)
+            if match:
+                return match.group(1)
+        return None
+    
+    def _get_wttr_url(self, city: str, days: int = 1) -> str:
+        """Get wttr.in URL for weather."""
+        if days == 1:
+            return f"https://wttr.in/{city}?format=j1"
+        else:
+            return f"https://wttr.in/{city}?format=j1"
+    
     def execute(self, query: str, callback: Optional[Callable] = None) -> OrchestratorResult:
         """Execute query following the orchestrator pattern."""
         start_time = time.time()
@@ -48,6 +70,12 @@ class Orchestrator:
         
         if callback:
             callback(f"Тип запроса: {query_type.value}")
+        
+        # Special handling for weather queries
+        if query_type == QueryType.CURRENT_DATA:
+            city = self._extract_city(query)
+            if city and any(w in query.lower() for w in ['погод', 'weather']):
+                return self._handle_weather(city, query, callback)
         
         # Step 2: Send to LLM with tools
         messages = [
@@ -149,6 +177,111 @@ class Orchestrator:
                 duration_ms=duration_ms
             )
     
+    def _handle_weather(self, city: str, query: str, callback: Optional[Callable] = None) -> OrchestratorResult:
+        """Handle weather queries."""
+        import time
+        import re
+        start_time = time.time()
+        
+        self.log.info(f"Weather request for city: {city}")
+        if callback:
+            callback(f"Город: {city}")
+        
+        try:
+            # Search for weather
+            search_query = f"погода в {city} сейчас температура"
+            self.log.info(f"Searching: {search_query}")
+            if callback:
+                callback(f"Поиск погоды в {city}...")
+            
+            search_result = self.tools.call("web_search", {"query": search_query, "num_results": 5})
+            
+            if not search_result.success:
+                return OrchestratorResult(
+                    success=False,
+                    answer=f"Не удалось найти погоду для {city}"
+                )
+            
+            # Extract weather data from search results
+            weather_data = self._extract_weather_from_search(search_result.output, city)
+            
+            duration_ms = int((time.time() - start_time) * 1000)
+            
+            return OrchestratorResult(
+                success=True,
+                answer=weather_data,
+                tools_called=["web_search"],
+                duration_ms=duration_ms
+            )
+            
+        except Exception as e:
+            self.log.error(f"Weather error: {e}", e)
+            return OrchestratorResult(
+                success=False,
+                answer=f"Ошибка при получении погоды: {e}"
+            )
+    
+    def _extract_weather_from_search(self, search_text: str, city: str) -> str:
+        """Extract weather data from search results."""
+        import re
+        
+        lines = search_text.split('\n')
+        weather_info = []
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Look for temperature
+            temp_match = re.search(r'температура[^+]*([+-]?\d+)', line, re.IGNORECASE)
+            if temp_match:
+                weather_info.append(f"Температура: {temp_match.group(1)}°C")
+            
+            # Look for "feels like"
+            feels_match = re.search(r'ощущается[^+]*([+-]?\d+)', line, re.IGNORECASE)
+            if feels_match:
+                weather_info.append(f"Ощущается как: {feels_match.group(1)}°C")
+            
+            # Look for wind
+            wind_match = re.search(r'ветер[^0-9]*(\d+[,.]?\d*)\s*(м/с|км/ч)', line, re.IGNORECASE)
+            if wind_match:
+                weather_info.append(f"Ветер: {wind_match.group(1)} {wind_match.group(2)}")
+            
+            # Look for humidity
+            hum_match = re.search(r'влажность[^0-9]*(\d+)%', line, re.IGNORECASE)
+            if hum_match:
+                weather_info.append(f"Влажность: {hum_match.group(1)}%")
+            
+            # Look for pressure
+            pres_match = re.search(r'давление[^0-9]*(\d+)\s*(мм|гПа|hPa)', line, re.IGNORECASE)
+            if pres_match:
+                weather_info.append(f"Давление: {pres_match.group(1)} {pres_match.group(2)}")
+            
+            # Look for weather condition
+            if 'облачно' in line.lower() or 'ясно' in line.lower() or 'дождь' in line.lower() or 'снег' in line.lower():
+                # Extract the condition
+                for condition in ['облачно с прояснениями', 'облачно', 'ясно', 'дождь', 'снег', 'пасмурно']:
+                    if condition in line.lower():
+                        weather_info.append(f"Погода: {condition}")
+                        break
+        
+        if weather_info:
+            # Remove duplicates
+            seen = set()
+            unique_info = []
+            for item in weather_info:
+                if item not in seen:
+                    seen.add(item)
+                    unique_info.append(item)
+            
+            return f"Погода в {city}:\n" + "\n".join(unique_info)
+        
+        # If no structured data found, return raw snippet
+        for line in lines:
+            if 'температура' in line.lower() or 'погод' in line.lower():
+                return f"Погода в {city}:\n{line.strip()[:300]}"
+        
+        return f"Не удалось извлечь данные о погоде в {city}"
+    
     def _get_system_prompt(self, query_type: QueryType) -> str:
         """Get system prompt based on query type."""
         prompts = {
@@ -156,14 +289,16 @@ class Orchestrator:
             QueryType.KNOWLEDGE: "Ты помощник. Отвечай из своих знаний, кратко.",
             QueryType.CURRENT_DATA: """Ты помощник с доступом к актуальным данным.
 
-ВАЖНО: Ты ДОЛЖЕН использовать инструменты для получения данных!
+ВАЖНО: Используй инструменты для получения данных!
 
-1. Сначала вызови web_search для поиска
-2. Затем web_fetch для чтения страницы  
-3. Извлеки из ответа ТОЧНЫЕ данные: температуру в градусах, скорость ветра, давление
+Для погоды:
+1. Вызови web_search для поиска
+2. Вызови web_fetch для чтения страницы
+3. Извлеки ТОЧНЫЕ данные: температуру, ветер, давление
 4. Ответь КОНКРЕТНО: "Температура +18°C, ветер 3 м/с, облачно"
-5. НЕ пиши "прогнозируется" или "ожидается" - пиши ТО ЧТО ЕСТЬ в данных
-6. НЕ вызывай инструменты повторно если уже получил данные""",
+
+Например: "Сейчас в Миассе +10°C, ясно, ветер 2 м/с"
+НЕ пиши "прогнозируется" - пиши ТО ЧТО ЕСТЬ в данных!""",
             QueryType.CODE: "Ты coding-помощник. Используй инструменты для написания и запуска кода.",
             QueryType.FILE_OP: "Ты помощник. Используй инструменты для работы с файлами.",
             QueryType.SEARCH: "Ты помощник. Найди информацию и кратко изложи ключевые факты.",
