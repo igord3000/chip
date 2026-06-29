@@ -6,12 +6,12 @@ from typing import Optional
 
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, Horizontal
-from textual.widgets import Static, Label, Button, Input, RadioButton, RadioSet, Select
+from textual.widgets import Static, Label, Button, Input, Select
 from textual.binding import Binding
 from textual import on
 
 from chip.config import load_config, AgentConfig
-from chip.providers import ProviderManager, PRESET_PROVIDERS, Provider, ProviderType
+from chip.providers import ProviderManager, PRESET_PROVIDERS
 
 
 class SettingsScreen(Static):
@@ -41,30 +41,39 @@ class SettingsScreen(Static):
         with Vertical(id="settings-panel"):
             yield Label("[bold]Настройки[/bold]", id="settings-title")
             
+            # Current settings display
+            yield Label(
+                f"Текущая модель: [bold]{self.config.llm.model}[/bold] | "
+                f"URL: [dim]{self.config.llm.base_url}[/dim]",
+                id="current-settings"
+            )
+            
             # Provider selection
-            yield Label("Провайдер:", classes="section-header")
+            yield Label("\nПровайдер:", classes="section-header")
             provider_options = [(f"{p.name}", key) for key, p in self.provider_manager.list_providers()]
             yield Select(provider_options, id="provider-select", prompt="Выберите провайдер")
             
-            # API Key (for non-local providers)
+            # API Key
             yield Label("API ключ:", classes="section-header")
-            yield Input(placeholder="Введите API ключ...", id="api-key-input", password=True)
-            yield Button("Сохранить ключ", id="save-key-btn", variant="default")
+            with Horizontal():
+                yield Input(placeholder="Введите API ключ...", id="api-key-input", password=True)
+                yield Button("Проверить", id="validate-key-btn", variant="default")
+                yield Button("Сохранить", id="save-key-btn", variant="primary")
+            yield Label("", id="key-status")
             
-            # Current model
-            yield Label(f"\nТекущая модель: [bold]{self.config.llm.model}[/bold]", id="current-model")
-            
-            # Model selection
-            yield Label("Модель:", classes="section-header")
-            
-            # For Ollama - show installed models
-            yield Label("Установленные модели:", id="models-label")
+            # Model selection for Ollama
+            yield Label("\nЛокальные модели (Ollama):", classes="section-header")
             models = self._installed_models
             if models:
                 model_options = [(m, m) for m in models]
                 yield Select(model_options, id="model-select", prompt="Выберите модель")
             else:
-                yield Label("[dim]Нет установленных моделей[/dim]")
+                yield Label("[dim]Нет установленных моделей. Установите через: ollama pull <model>[/dim]")
+            
+            # Test model button
+            with Horizontal():
+                yield Button("Проверить модель", id="test-model-btn", variant="default")
+            yield Label("", id="model-status")
             
             # Download new model
             yield Label("\nСкачать модель:", classes="section-header")
@@ -78,6 +87,7 @@ class SettingsScreen(Static):
                 ("openai/gpt-4o-mini", "OpenAI GPT-4o Mini"),
                 ("anthropic/claude-3.5-sonnet", "Claude 3.5 Sonnet"),
                 ("meta-llama/llama-3.1-8b-instruct", "Llama 3.1 8B"),
+                ("qwen/qwen-2.5-7b-instruct", "Qwen 2.5 7B"),
             ]
             yield Select([(d, m) for m, d in cloud_models], id="cloud-model-select", prompt="Облачная модель")
             
@@ -97,9 +107,10 @@ class SettingsScreen(Static):
             if provider:
                 self.config.llm.base_url = provider.base_url
                 self.config.llm.api_key = provider.api_key
-                if provider.default_model:
-                    self.config.llm.model = provider.default_model
-                    self.query_one("#current-model").update(f"Текущая модель: [bold]{provider.default_model}[/bold]")
+                self.query_one("#current-settings").update(
+                    f"Текущая модель: [bold]{self.config.llm.model}[/bold] | "
+                    f"URL: [dim]{provider.base_url}[/dim]"
+                )
     
     @on(Select.Changed, "#model-select")
     def handle_model_change(self, event: Select.Changed):
@@ -107,7 +118,7 @@ class SettingsScreen(Static):
         model = event.value
         if model:
             self.config.llm.model = model
-            self.query_one("#current-model").update(f"Текущая модель: [bold]{model}[/bold]")
+            self._update_current_settings()
             self._save_config()
     
     @on(Select.Changed, "#cloud-model-select")
@@ -116,24 +127,87 @@ class SettingsScreen(Static):
         model = event.value
         if model:
             self.config.llm.model = model
-            self.query_one("#current-model").update(f"Текущая модель: [bold]{model}[/bold]")
+            self._update_current_settings()
             self._save_config()
+    
+    @on(Button.Pressed, "#validate-key-btn")
+    def handle_validate_key(self):
+        """Validate API key."""
+        from chip.api_validator import validate_api_key
+        
+        key_input = self.query_one("#api-key-input")
+        api_key = key_input.value.strip()
+        provider_select = self.query_one("#provider-select")
+        provider_key = provider_select.value
+        
+        if not provider_key:
+            self.query_one("#key-status").update("[red]Сначала выберите провайдер[/red]")
+            return
+        
+        provider = self.provider_manager.get_provider(provider_key)
+        if not provider:
+            self.query_one("#key-status").update("[red]Провайдер не найден[/red]")
+            return
+        
+        self.query_one("#key-status").update("[yellow]Проверка...[/yellow]")
+        
+        is_valid, message = validate_api_key(provider_key, api_key or provider.api_key, provider.base_url)
+        
+        if is_valid:
+            self.query_one("#key-status").update(f"[green]✓ {message}[/green]")
+        else:
+            self.query_one("#key-status").update(f"[red]✗ {message}[/red]")
     
     @on(Button.Pressed, "#save-key-btn")
     def handle_save_key(self):
         """Save API key."""
         key_input = self.query_one("#api-key-input")
         api_key = key_input.value.strip()
+        provider_select = self.query_one("#provider-select")
+        provider_key = provider_select.value
+        
+        if not provider_key:
+            self.query_one("#key-status").update("[red]Сначала выберите провайдер[/red]")
+            return
+        
         if api_key:
-            # Get current provider
-            provider_select = self.query_one("#provider-select")
-            provider_key = provider_select.value
             provider = self.provider_manager.get_provider(provider_key)
             if provider:
                 provider.api_key = api_key
                 self.provider_manager._save()
                 self.config.llm.api_key = api_key
-                self.query_one("#current-model").update("[green]✓ API ключ сохранён[/green]")
+                self.query_one("#key-status").update("[green]✓ API ключ сохранён[/green]")
+    
+    @on(Button.Pressed, "#test-model-btn")
+    def handle_test_model(self):
+        """Test if model works."""
+        from chip.api_validator import test_chat_completion
+        
+        provider_select = self.query_one("#provider-select")
+        provider_key = provider_select.value
+        
+        if not provider_key:
+            self.query_one("#model-status").update("[red]Сначала выберите провайдер[/red]")
+            return
+        
+        provider = self.provider_manager.get_provider(provider_key)
+        if not provider:
+            self.query_one("#model-status").update("[red]Провайдер не найден[/red]")
+            return
+        
+        self.query_one("#model-status").update("[yellow]Проверка модели...[/yellow]")
+        
+        is_valid, message = test_chat_completion(
+            provider_key,
+            provider.api_key,
+            provider.base_url,
+            self.config.llm.model
+        )
+        
+        if is_valid:
+            self.query_one("#model-status").update(f"[green]✓ {message}[/green]")
+        else:
+            self.query_one("#model-status").update(f"[red]✗ {message}[/red]")
     
     @on(Button.Pressed, "#download-btn")
     async def handle_download(self):
@@ -144,7 +218,7 @@ class SettingsScreen(Static):
         if not model_name:
             return
         
-        self.query_one("#current-model").update(f"Скачивание {model_name}...")
+        self.query_one("#model-status").update(f"[yellow]Скачивание {model_name}...[/yellow]")
         
         try:
             result = subprocess.run(
@@ -152,12 +226,12 @@ class SettingsScreen(Static):
                 capture_output=True, text=True, timeout=300
             )
             if result.returncode == 0:
-                self.query_one("#current-model").update(f"[green]✓ {model_name} скачана[/green]")
+                self.query_one("#model-status").update(f"[green]✓ {model_name} скачана[/green]")
                 self._installed_models = self._get_installed_models()
             else:
-                self.query_one("#current-model").update(f"[red]✗ Ошибка: {result.stderr[:100]}[/red]")
+                self.query_one("#model-status").update(f"[red]✗ Ошибка: {result.stderr[:100]}[/red]")
         except Exception as e:
-            self.query_one("#current-model").update(f"[red]✗ Ошибка: {e}[/red]")
+            self.query_one("#model-status").update(f"[red]✗ Ошибка: {e}[/red]")
     
     @on(Button.Pressed, "#clear-cache-btn")
     async def handle_clear_cache(self):
@@ -166,7 +240,14 @@ class SettingsScreen(Static):
         if cache_dir.exists():
             for f in cache_dir.glob("*.json"):
                 f.unlink()
-            self.query_one("#current-model").update("[green]Кэш очищен[/green]")
+            self.query_one("#model-status").update("[green]Кэш очищен[/green]")
+    
+    def _update_current_settings(self):
+        """Update current settings display."""
+        self.query_one("#current-settings").update(
+            f"Текущая модель: [bold]{self.config.llm.model}[/bold] | "
+            f"URL: [dim]{self.config.llm.base_url}[/dim]"
+        )
     
     def _save_config(self):
         """Save config to file."""
