@@ -104,9 +104,9 @@ class ChipApp(App):
     }
     
     #input-container {
+        dock: bottom;
         height: auto;
         min-height: 3;
-        max-height: 5;
         padding: 1;
         background: $surface;
         border-top: solid $primary;
@@ -119,7 +119,7 @@ class ChipApp(App):
     
     #send-btn {
         width: auto;
-        min-width: 8;
+        min-width: 12;
     }
     
     .msg-header {
@@ -145,9 +145,11 @@ class ChipApp(App):
     }
     
     LoadingWidget {
+        dock: bottom;
         height: 1;
         padding: 0 1;
         background: $accent-darken-1;
+        text-align: center;
     }
     
     StatusBar {
@@ -181,7 +183,7 @@ class ChipApp(App):
         yield StatusBar(self.model)
         yield ScrollableContainer(id="chat-container")
         with Horizontal(id="input-container"):
-            yield Input(placeholder="Введите сообщение... (Enter - отправить)", id="user-input")
+            yield Input(placeholder="Введите сообщение...", id="user-input")
             yield Button("Отправить", id="send-btn", variant="primary")
     
     @on(Input.Submitted, "#user-input")
@@ -195,11 +197,11 @@ class ChipApp(App):
             return
         
         input_widget.value = ""
-        input_widget.disabled = True
         
         # Add user message to UI
         chat_container = self.query_one("#chat-container")
         chat_container.mount(ChatMessage("user", message))
+        chat_container.scroll_end()
         
         # Add to messages
         self.messages.append({"role": "user", "content": message})
@@ -212,15 +214,13 @@ class ChipApp(App):
         if cached:
             self.cache_hits += 1
             chat_container.mount(ChatMessage("assistant", f"[cached] {cached}"))
+            chat_container.scroll_end()
             self._update_status()
-            input_widget.disabled = False
-            input_widget.focus()
             return
         
-        # Show loading indicator
+        # Show loading indicator at top
         loading = LoadingWidget()
-        chat_container.mount(loading)
-        chat_container.scroll_end()
+        self.screen.mount(loading)
         
         # Get response from LLM
         try:
@@ -267,8 +267,6 @@ class ChipApp(App):
         
         # Scroll to bottom
         chat_container.scroll_end()
-        input_widget.disabled = False
-        input_widget.focus()
     
     def _update_status(self):
         """Update status bar."""
