@@ -1,15 +1,17 @@
 """Settings screen for Chip agent."""
+import json
 import subprocess
 from pathlib import Path
 from typing import Optional
 
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, Horizontal
-from textual.widgets import Static, Label, Button, Input, RadioButton, RadioSet
+from textual.widgets import Static, Label, Button, Input, RadioButton, RadioSet, Select
 from textual.binding import Binding
 from textual import on
 
 from chip.config import load_config, AgentConfig
+from chip.providers import ProviderManager, PRESET_PROVIDERS, Provider, ProviderType
 
 
 class SettingsScreen(Static):
@@ -18,6 +20,7 @@ class SettingsScreen(Static):
     def __init__(self, config: AgentConfig, **kwargs):
         super().__init__(**kwargs)
         self.config = config
+        self.provider_manager = ProviderManager()
         self._installed_models = self._get_installed_models()
     
     def _get_installed_models(self) -> list[str]:
@@ -38,25 +41,45 @@ class SettingsScreen(Static):
         with Vertical(id="settings-panel"):
             yield Label("[bold]Настройки[/bold]", id="settings-title")
             
+            # Provider selection
+            yield Label("Провайдер:", classes="section-header")
+            provider_options = [(key, f"{p.name}") for key, p in self.provider_manager.list_providers()]
+            yield Select(provider_options, id="provider-select", value="ollama")
+            
+            # API Key (for non-local providers)
+            yield Label("API ключ:", classes="section-header")
+            yield Input(placeholder="Введите API ключ...", id="api-key-input", password=True)
+            yield Button("Сохранить ключ", id="save-key-btn", variant="default")
+            
             # Current model
-            yield Label(f"Текущая модель: [bold]{self.config.llm.model}[/bold]", id="current-model")
+            yield Label(f"\nТекущая модель: [bold]{self.config.llm.model}[/bold]", id="current-model")
             
-            # Available models
-            yield Label("\nУстановленные модели:", classes="section-header")
+            # Model selection
+            yield Label("Модель:", classes="section-header")
             
+            # For Ollama - show installed models
+            yield Label("Установленные модели:", id="models-label")
             models = self._installed_models
             if models:
-                for model in models:
-                    size = self._get_model_size(model)
-                    yield RadioButton(f"{model} ({size})", id=f"model_{model.replace(':', '_')}")
+                model_options = [(m, m) for m in models]
+                yield Select(model_options, id="model-select", value=models[0] if models else None)
             else:
                 yield Label("[dim]Нет установленных моделей[/dim]")
             
             # Download new model
-            yield Label("\nСкачать новую модель:", classes="section-header")
+            yield Label("\nСкачать модель:", classes="section-header")
             with Horizontal():
                 yield Input(placeholder="qwen3:8b", id="new-model-input")
                 yield Button("Скачать", id="download-btn", variant="primary")
+            
+            # Cloud models
+            yield Label("\nОблачные модели:", classes="section-header")
+            cloud_models = [
+                ("openai/gpt-4o-mini", "OpenAI GPT-4o Mini"),
+                ("anthropic/claude-3.5-sonnet", "Claude 3.5 Sonnet"),
+                ("meta-llama/llama-3.1-8b-instruct", "Llama 3.1 8B"),
+            ]
+            yield Select([(m, d) for m, d in cloud_models], id="cloud-model-select")
             
             # Cache
             yield Label("\nКэш:", classes="section-header")
@@ -65,20 +88,51 @@ class SettingsScreen(Static):
             yield Label(f"Записей в кэше: {cache_count}")
             yield Button("Очистить кэш", id="clear-cache-btn", variant="warning")
     
-    def _get_model_size(self, model: str) -> str:
-        """Get model size from Ollama."""
-        try:
-            result = subprocess.run(
-                ["ollama", "show", model],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                for line in result.stdout.split("\n"):
-                    if "size" in line.lower():
-                        return line.split(":")[-1].strip()
-        except Exception:
-            pass
-        return "?"
+    @on(Select.Changed, "#provider-select")
+    def handle_provider_change(self, event: Select.Changed):
+        """Handle provider selection."""
+        provider_key = event.value
+        provider = self.provider_manager.get_provider(provider_key)
+        if provider:
+            self.config.llm.base_url = provider.base_url
+            self.config.llm.api_key = provider.api_key
+            if provider.default_model:
+                self.config.llm.model = provider.default_model
+                self.query_one("#current-model").update(f"Текущая модель: [bold]{provider.default_model}[/bold]")
+    
+    @on(Select.Changed, "#model-select")
+    def handle_model_change(self, event: Select.Changed):
+        """Handle model selection."""
+        model = event.value
+        if model:
+            self.config.llm.model = model
+            self.query_one("#current-model").update(f"Текущая модель: [bold]{model}[/bold]")
+            self._save_config()
+    
+    @on(Select.Changed, "#cloud-model-select")
+    def handle_cloud_model_change(self, event: Select.Changed):
+        """Handle cloud model selection."""
+        model = event.value
+        if model:
+            self.config.llm.model = model
+            self.query_one("#current-model").update(f"Текущая модель: [bold]{model}[/bold]")
+            self._save_config()
+    
+    @on(Button.Pressed, "#save-key-btn")
+    def handle_save_key(self):
+        """Save API key."""
+        key_input = self.query_one("#api-key-input")
+        api_key = key_input.value.strip()
+        if api_key:
+            # Get current provider
+            provider_select = self.query_one("#provider-select")
+            provider_key = provider_select.value
+            provider = self.provider_manager.get_provider(provider_key)
+            if provider:
+                provider.api_key = api_key
+                self.provider_manager._save()
+                self.config.llm.api_key = api_key
+                self.query_one("#current-model").update("[green]✓ API ключ сохранён[/green]")
     
     @on(Button.Pressed, "#download-btn")
     async def handle_download(self):
@@ -113,17 +167,13 @@ class SettingsScreen(Static):
                 f.unlink()
             self.query_one("#current-model").update("[green]Кэш очищен[/green]")
     
-    @on(RadioButton.Changed)
-    def handle_model_select(self, event: RadioButton.Changed):
-        """Handle model selection."""
-        if event.radio_button.value:
-            model_name = event.radio_button.id.replace("model_", "").replace("_", ":")
-            self.config.llm.model = model_name
-            self.query_one("#current-model").update(f"Текущая модель: [bold]{model_name}[/bold]")
-            
-            # Save to config file
-            config_path = Path.home() / ".chip" / "config.json"
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            import json
-            with open(config_path, "w") as f:
-                json.dump({"model": model_name}, f)
+    def _save_config(self):
+        """Save config to file."""
+        config_path = Path.home() / ".chip" / "config.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_path, "w") as f:
+            json.dump({
+                "model": self.config.llm.model,
+                "base_url": self.config.llm.base_url,
+                "api_key": self.config.llm.api_key,
+            }, f)

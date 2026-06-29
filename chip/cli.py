@@ -113,6 +113,23 @@ def cmd_restart():
     restart_ollama()
 
 
+def cmd_providers():
+    """List available providers."""
+    from chip.providers import ProviderManager
+    
+    manager = ProviderManager()
+    
+    print("Доступные провайдеры:")
+    print("-" * 50)
+    
+    for key, provider in manager.list_providers():
+        status = "✓" if provider.api_key or provider.type.value == "ollama" else "✗ нет ключа"
+        print(f"  {key:15} {provider.name:25} [{status}]")
+        if provider.api_key or provider.type.value == "ollama":
+            print(f"  {'':15} URL: {provider.base_url}")
+            print(f"  {'':15} Модели: {', '.join(provider.models[:3])}...")
+
+
 def cmd_sessions(args):
     """Manage sessions."""
     checkpoint_dir = Path.home() / ".chip" / "sessions"
@@ -155,19 +172,22 @@ Examples:
     parser.add_argument("-s", "--setup", action="store_true", help="Setup Chip")
     parser.add_argument("--status", action="store_true", help="Show status")
     parser.add_argument("--restart", action="store_true", help="Restart Ollama")
+    parser.add_argument("--providers", action="store_true", help="List providers")
     parser.add_argument("--sessions", nargs="?", const="list", help="Manage sessions")
     parser.add_argument("task", nargs="*", help="Task to execute")
     
     args = parser.parse_args()
     
     # No args = GUI
-    if not any([args.chat, args.setup, args.status, args.sessions, args.task, args.restart]):
+    if not any([args.chat, args.setup, args.status, args.sessions, args.task, args.restart, args.providers]):
         args.gui = True
     
     if args.setup:
         cmd_setup(args)
     elif args.restart:
         cmd_restart()
+    elif args.providers:
+        cmd_providers()
     elif args.status:
         cmd_status(args)
     elif args.sessions:

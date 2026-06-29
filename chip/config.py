@@ -1,5 +1,6 @@
 """Configuration management with env vars and config file support."""
 import os
+import json
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,6 +25,18 @@ def _detect_model() -> str:
     except Exception:
         pass
     return "qwen3:1.7b"
+
+
+def _load_saved_config() -> dict:
+    """Load saved config from file."""
+    config_path = Path.home() / ".chip" / "config.json"
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
 
 
 @dataclass
@@ -56,4 +69,15 @@ class AgentConfig:
 def load_config() -> AgentConfig:
     config = AgentConfig()
     config.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Load saved settings
+    saved = _load_saved_config()
+    if saved:
+        if "model" in saved:
+            config.llm.model = saved["model"]
+        if "base_url" in saved:
+            config.llm.base_url = saved["base_url"]
+        if "api_key" in saved:
+            config.llm.api_key = saved["api_key"]
+    
     return config
