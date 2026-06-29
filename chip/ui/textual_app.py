@@ -116,6 +116,12 @@ class ChipApp(App):
         padding: 1;
     }
     
+    #settings-panel {
+        height: 1fr;
+        overflow-y: auto;
+        padding: 1;
+    }
+    
     #input-container {
         dock: bottom;
         height: auto;

@@ -145,12 +145,13 @@ class SettingsScreen(Static):
     
     @on(Select.Changed, "#model-select")
     def handle_model_change(self, event: Select.Changed):
-        """Handle model selection."""
+        """Handle model selection - auto-save."""
         model = event.value
         if model:
             self.config.llm.model = model
             self._update_current_settings()
             self._save_config()
+            self.query_one("#model-status").update(f"[green]✓ Модель: {model}[/green]")
     
     @on(Button.Pressed, "#validate-key-btn")
     def handle_validate_key(self):

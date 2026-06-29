@@ -45,7 +45,7 @@ class LLMConfig:
     api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", "ollama"))
     model: str = field(default_factory=lambda: os.getenv("LLM_MODEL") or _detect_model())
     temperature: float = field(default_factory=lambda: float(os.getenv("LLM_TEMPERATURE", "0.7")))
-    max_tokens: int = field(default_factory=lambda: int(os.getenv("LLM_MAX_TOKENS", "1024")))
+    max_tokens: int = field(default_factory=lambda: int(os.getenv("LLM_MAX_TOKENS", "4096")))
     timeout: int = field(default_factory=lambda: int(os.getenv("LLM_TIMEOUT", "120")))
 
 
