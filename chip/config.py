@@ -24,7 +24,7 @@ def _detect_model() -> str:
                 return lines[0].split()[0]
     except Exception:
         pass
-    return "qwen3:1.7b"
+    return "cohere/north-mini-code:free"
 
 
 def _load_saved_config() -> dict:

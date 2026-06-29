@@ -36,7 +36,7 @@ def ensure_ollama():
 def cmd_gui(args):
     """Launch Textual GUI."""
     from chip.ui.textual_app import ChipApp
-    app = ChipApp(model=args.model or "qwen3:1.7b")
+    app = ChipApp(model=args.model)
     app.run()
 
 
@@ -76,7 +76,7 @@ def cmd_setup(args):
     print("✓ Ollama running")
     
     # Pull model
-    model = args.model or "qwen3:1.7b"
+    model = args.model
     print(f"Pulling {model}...")
     subprocess.run(["ollama", "pull", model])
     print(f"✓ Model {model} ready")

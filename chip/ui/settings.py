@@ -23,6 +23,13 @@ class SettingsScreen(Static):
         self._current_provider = "ollama"
     
     def compose(self) -> ComposeResult:
+        # Determine current provider from base_url
+        current_provider = "ollama"
+        for key, p in self.provider_manager.list_providers():
+            if p.base_url == self.config.llm.base_url:
+                current_provider = key
+                break
+        
         with ScrollableContainer(id="settings-scroll"):
             # Current model
             yield Label(f"Текущая модель: [bold]{self.config.llm.model}[/bold]", id="current-model")
@@ -30,11 +37,13 @@ class SettingsScreen(Static):
             # Provider
             yield Label("Провайдер:", classes="section")
             provider_options = [(f"{p.name}", key) for key, p in self.provider_manager.list_providers()]
-            yield Select(provider_options, id="provider-select", prompt="Выберите провайдер")
+            yield Select(provider_options, id="provider-select", prompt="Выберите провайдер", value=current_provider)
             
-            # API Key
+            # API Key - show if exists
+            provider = self.provider_manager.get_provider(current_provider)
+            key_hint = f"{'*' * 8}...{provider.api_key[-4:]}" if provider and provider.api_key else ""
             yield Label("API ключ:", classes="section")
-            yield Input(placeholder="API ключ...", id="api-key-input", password=True)
+            yield Input(placeholder=key_hint or "Введите API ключ...", id="api-key-input", password=True)
             with Horizontal():
                 yield Button("Проверить", id="validate-key-btn")
                 yield Button("Сохранить ключ", id="save-key-btn")
