@@ -311,6 +311,33 @@ class Agent:
                     "tool_call_id": tool_call["id"],
                     "content": result.output if result.success else f"Error: {result.error}"
                 })
+                
+                # AUTO-PIPELINE: After web_search, automatically fetch first URL
+                if func_name == "web_search" and result.success:
+                    first_url = self._extract_first_url(result.output)
+                    if first_url:
+                        chat_ui.print_info(f"Fetching: {first_url}")
+                        fetch_result = self.tools.call("web_fetch", {"url": first_url, "format": "text"})
+                        
+                        if fetch_result.success:
+                            self.messages.append({
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [{
+                                    "id": f"auto_fetch_{tool_call['id']}",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "web_fetch",
+                                        "arguments": json.dumps({"url": first_url, "format": "text"})
+                                    }
+                                }]
+                            })
+                            self.messages.append({
+                                "role": "tool",
+                                "tool_call_id": f"auto_fetch_{tool_call['id']}",
+                                "content": fetch_result.output
+                            })
+                            chat_ui.print_tool_result(fetch_result.output[:200], True)
             
             tokens = self.tracker.update(self.messages)
             if self.tracker.is_critical:
@@ -327,6 +354,14 @@ class Agent:
         chat_ui.print_info("Saved sessions:")
         for cp in checkpoints[-5:]:
             chat_ui.print_info(f"  {cp.name}")
+
+    def _extract_first_url(self, text: str) -> Optional[str]:
+        """Extract first URL from search results."""
+        import re
+        urls = re.findall(r'https?://[^\s\)]+', text)
+        if urls:
+            return urls[0]
+        return None
 
     def _show_help(self, chat_ui):
         """Show help."""
