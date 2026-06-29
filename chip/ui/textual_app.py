@@ -215,6 +215,20 @@ class ChipApp(App):
                 if isinstance(child, SettingsScreen):
                     child.remove()
             self.showing_settings = False
+            
+            # Reload config from file
+            from chip.config import load_config
+            self.config = load_config()
+            
+            # Update LLM client
+            from chip.llm import LLMClient
+            self.llm = LLMClient(self.config.llm)
+            
+            # Update status bar
+            self.query_one(StatusBar).model = self.config.llm.model
+            self.query_one("#model-label").update(f"Model: {self.config.llm.model}")
+            
+            self.log_activity(f"Модель: {self.config.llm.model}", "green")
         else:
             # Hide chat messages, show settings
             for child in chat_container.children:

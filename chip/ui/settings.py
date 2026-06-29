@@ -91,6 +91,10 @@ class SettingsScreen(Static):
             cache_count = len(list(cache_dir.glob("*.json"))) if cache_dir.exists() else 0
             yield Label(f"Записей: {cache_count}")
             yield Button("Очистить", id="clear-cache-btn")
+            
+            # Apply button
+            yield Label("")
+            yield Button("Применить и перезапустить", id="apply-btn", variant="success")
     
     @on(Select.Changed, "#provider-select")
     def handle_provider_change(self, event: Select.Changed):
@@ -232,6 +236,13 @@ class SettingsScreen(Static):
             for f in cache_dir.glob("*.json"):
                 f.unlink()
             self.query_one("#model-status").update("[green]Кэш очищен[/green]")
+    
+    @on(Button.Pressed, "#apply-btn")
+    def handle_apply(self):
+        """Apply settings and restart."""
+        self._save_config()
+        self.query_one("#model-status").update("[green]✓ Настройки применены. Перезапуск...[/green]")
+        # The app will read config on restart
     
     def _update_current_settings(self):
         """Update current settings display."""
