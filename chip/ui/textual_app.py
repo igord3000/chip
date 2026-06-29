@@ -424,7 +424,9 @@ class ChipApp(App):
         """Reload the application."""
         import os
         import sys
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+        # Remove --reload from args to prevent infinite loop
+        args = [a for a in sys.argv if a != "--reload"]
+        os.execv(sys.executable, args)
 
 
 def main():

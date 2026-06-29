@@ -118,7 +118,9 @@ def cmd_reload():
     import os
     import sys
     print("Перезапуск Chip...")
-    os.execv(sys.executable, [sys.executable] + sys.argv)
+    # Remove --reload from args to prevent infinite loop
+    args = [a for a in sys.argv if a != "--reload"]
+    os.execv(sys.executable, args)
 
 
 def cmd_providers():
