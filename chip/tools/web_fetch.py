@@ -101,7 +101,8 @@ class WebFetchTool(BaseTool):
         text = re.sub(r'<[^>]+>', '', html)
         
         # Decode HTML entities
-        text = text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+        import html
+        text = html.unescape(text)
         text = text.replace('&quot;', '"').replace('&#x27;', "'").replace('&nbsp;', ' ')
         
         # Clean up whitespace

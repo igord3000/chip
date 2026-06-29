@@ -22,6 +22,13 @@ class ResponseCache:
     
     def get(self, messages: list[dict]) -> Optional[str]:
         """Get cached response if exists and not expired."""
+        # Don't cache weather/current data queries
+        for msg in messages:
+            if msg.get("role") == "user":
+                content = msg.get("content", "").lower()
+                if any(w in content for w in ['погод', 'курс', 'цен', 'акци']):
+                    return None  # Don't use cache for current data
+        
         key = self._make_key(messages)
         
         # Check memory cache first
@@ -121,6 +128,10 @@ class SemanticCache:
     
     def get(self, query: str, threshold: float = 0.4) -> Optional[str]:
         """Find similar cached response."""
+        # Don't use cache for weather/current data queries
+        if any(w in query.lower() for w in ['погод', 'курс', 'цен', 'акци']):
+            return None
+        
         best_match = None
         best_score = 0.0
         
