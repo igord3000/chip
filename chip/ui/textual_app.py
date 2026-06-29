@@ -158,6 +158,7 @@ class ChipApp(App):
         Binding("ctrl+c", "clear_chat", "Clear"),
         Binding("ctrl+s", "save_session", "Save"),
         Binding("ctrl+comma", "show_settings", "Settings"),
+        Binding("ctrl+r", "reload", "Reload"),
     ]
     
     def __init__(self, model: str = "qwen3:1.7b"):
@@ -354,6 +355,12 @@ class ChipApp(App):
         manager = CheckpointManager(self.config.checkpoint_dir)
         path = manager.save(self.messages, "", {"tokens": self.tracker.current_tokens})
         self.log_activity(f"Сессия сохранена: {path}", "green")
+    
+    def action_reload(self):
+        """Reload the application."""
+        import os
+        import sys
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 def main():

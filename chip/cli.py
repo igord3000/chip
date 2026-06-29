@@ -113,6 +113,14 @@ def cmd_restart():
     restart_ollama()
 
 
+def cmd_reload():
+    """Reload Chip - restart the current process."""
+    import os
+    import sys
+    print("Перезапуск Chip...")
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
 def cmd_providers():
     """List available providers."""
     from chip.providers import ProviderManager
@@ -172,6 +180,7 @@ Examples:
     parser.add_argument("-s", "--setup", action="store_true", help="Setup Chip")
     parser.add_argument("--status", action="store_true", help="Show status")
     parser.add_argument("--restart", action="store_true", help="Restart Ollama")
+    parser.add_argument("--reload", action="store_true", help="Reload Chip (restart GUI)")
     parser.add_argument("--providers", action="store_true", help="List providers")
     parser.add_argument("--sessions", nargs="?", const="list", help="Manage sessions")
     parser.add_argument("task", nargs="*", help="Task to execute")
@@ -179,13 +188,15 @@ Examples:
     args = parser.parse_args()
     
     # No args = GUI
-    if not any([args.chat, args.setup, args.status, args.sessions, args.task, args.restart, args.providers]):
+    if not any([args.chat, args.setup, args.status, args.sessions, args.task, args.restart, args.providers, args.reload]):
         args.gui = True
     
     if args.setup:
         cmd_setup(args)
     elif args.restart:
         cmd_restart()
+    elif args.reload:
+        cmd_reload()
     elif args.providers:
         cmd_providers()
     elif args.status:

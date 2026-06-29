@@ -43,8 +43,8 @@ class SettingsScreen(Static):
             
             # Provider selection
             yield Label("Провайдер:", classes="section-header")
-            provider_options = [(key, f"{p.name}") for key, p in self.provider_manager.list_providers()]
-            yield Select(provider_options, id="provider-select", value="ollama")
+            provider_options = [(f"{p.name}", key) for key, p in self.provider_manager.list_providers()]
+            yield Select(provider_options, id="provider-select", prompt="Выберите провайдер")
             
             # API Key (for non-local providers)
             yield Label("API ключ:", classes="section-header")
@@ -62,7 +62,7 @@ class SettingsScreen(Static):
             models = self._installed_models
             if models:
                 model_options = [(m, m) for m in models]
-                yield Select(model_options, id="model-select", value=models[0] if models else None)
+                yield Select(model_options, id="model-select", prompt="Выберите модель")
             else:
                 yield Label("[dim]Нет установленных моделей[/dim]")
             
@@ -79,7 +79,7 @@ class SettingsScreen(Static):
                 ("anthropic/claude-3.5-sonnet", "Claude 3.5 Sonnet"),
                 ("meta-llama/llama-3.1-8b-instruct", "Llama 3.1 8B"),
             ]
-            yield Select([(m, d) for m, d in cloud_models], id="cloud-model-select")
+            yield Select([(d, m) for m, d in cloud_models], id="cloud-model-select", prompt="Облачная модель")
             
             # Cache
             yield Label("\nКэш:", classes="section-header")
@@ -92,13 +92,14 @@ class SettingsScreen(Static):
     def handle_provider_change(self, event: Select.Changed):
         """Handle provider selection."""
         provider_key = event.value
-        provider = self.provider_manager.get_provider(provider_key)
-        if provider:
-            self.config.llm.base_url = provider.base_url
-            self.config.llm.api_key = provider.api_key
-            if provider.default_model:
-                self.config.llm.model = provider.default_model
-                self.query_one("#current-model").update(f"Текущая модель: [bold]{provider.default_model}[/bold]")
+        if provider_key:
+            provider = self.provider_manager.get_provider(provider_key)
+            if provider:
+                self.config.llm.base_url = provider.base_url
+                self.config.llm.api_key = provider.api_key
+                if provider.default_model:
+                    self.config.llm.model = provider.default_model
+                    self.query_one("#current-model").update(f"Текущая модель: [bold]{provider.default_model}[/bold]")
     
     @on(Select.Changed, "#model-select")
     def handle_model_change(self, event: Select.Changed):
