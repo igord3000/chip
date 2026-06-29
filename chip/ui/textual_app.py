@@ -110,6 +110,7 @@ class ChipApp(App):
         text-align: center;
         background: $accent-darken-2;
         color: white;
+        height: 1;
     }
     
     #activity-log {
@@ -125,20 +126,14 @@ class ChipApp(App):
     #settings-scroll {
         height: 1fr;
         overflow-y: auto;
-        padding: 1;
-    }
-    
-    .section {
-        margin-top: 1;
-        margin-bottom: 0;
-        color: $accent;
+        padding: 0 2;
     }
     
     #input-container {
         dock: bottom;
         height: auto;
         min-height: 3;
-        padding: 1;
+        padding: 0 1;
         background: $surface;
         border-top: solid $primary;
     }
@@ -150,7 +145,14 @@ class ChipApp(App):
     
     #send-btn {
         width: auto;
-        min-width: 12;
+        min-width: 10;
+        height: 3;
+    }
+    
+    #settings-btn {
+        width: auto;
+        min-width: 3;
+        height: 3;
     }
     
     .msg-header {
